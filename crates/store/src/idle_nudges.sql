@@ -1,6 +1,12 @@
 -- func: due
 SELECT session, result_seq, created_at, state, message_id FROM idle_nudges
-WHERE (state = 'pending' AND created_at <= @cutoff) OR state = 'queued'
+WHERE state = 'pending' AND recheck_at IS NULL AND created_at <= @cutoff
+UNION ALL
+SELECT session, result_seq, created_at, state, message_id FROM idle_nudges
+WHERE state = 'pending' AND recheck_at <= @now
+UNION ALL
+SELECT session, result_seq, created_at, state, message_id FROM idle_nudges
+WHERE state = 'queued'
 ORDER BY created_at, session, result_seq;
 
 -- func: lookup
@@ -9,6 +15,10 @@ SELECT state, message_id FROM idle_nudges WHERE session = @session AND result_se
 -- func: settle
 UPDATE idle_nudges SET state = @state, message_id = @message_id
 WHERE session = @session AND result_seq = @result_seq;
+
+-- func: defer
+UPDATE idle_nudges SET recheck_at = @recheck_at
+WHERE session = @session AND result_seq = @result_seq AND state = 'pending';
 
 -- func: inputs
 WITH boundary AS (

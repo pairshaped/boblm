@@ -14,11 +14,15 @@ impl Reader {
         jobs: Option<&boblm_protocol::jobs::JobSnapshot>,
         now: i64,
     ) -> Result<bool> {
-        jobs_quiet(&self.conn, session, running, jobs, now)
+        Ok(matches!(
+            jobs_quiet(&self.conn, session, running, jobs, now)?,
+            QuietCheck::Quiet
+        ))
     }
 
-    pub fn due_idle_nudges(&self, cutoff: i64) -> Result<Vec<IdleNudge>> {
-        Ok(sql::due(&self.conn, sql::DueParams { cutoff })?)
+    pub fn due_idle_nudges(&self, now: i64) -> Result<Vec<IdleNudge>> {
+        let cutoff = now.saturating_sub(boblm_tuning::IDLE_NUDGE_DELAY.as_millis() as i64);
+        Ok(sql::due(&self.conn, sql::DueParams { cutoff, now })?)
     }
 
     pub fn idle_nudge_input(
@@ -71,7 +75,6 @@ impl Store {
             return Ok(row.state == "queued");
         }
         let eligible = quiet
-            && snapshots_quiet(&tx, session, result_seq, now)?
             && sql::eligible(
                 &tx,
                 sql::EligibleParams {
@@ -82,6 +85,26 @@ impl Store {
             .pop()
             .unwrap_or(0)
                 != 0;
+        // Jobs can defer only after every other guard passes, including guards
+        // on children visited after one with a recent job.
+        let check = if eligible {
+            snapshots_quiet(&tx, session, result_seq, now)?
+        } else {
+            QuietCheck::Blocked
+        };
+        if let QuietCheck::RecentJobsUntil(recheck_at) = check {
+            sql::defer(
+                &tx,
+                sql::DeferParams {
+                    session,
+                    result_seq,
+                    recheck_at: Some(recheck_at),
+                },
+            )?;
+            tx.commit()?;
+            return Ok(false);
+        }
+        let eligible = matches!(check, QuietCheck::Quiet);
         if eligible {
             crate::messages::sql::append(
                 &tx,
@@ -138,6 +161,12 @@ impl Store {
     }
 }
 
+enum QuietCheck {
+    Quiet,
+    RecentJobsUntil(i64),
+    Blocked,
+}
+
 /// Recheck persisted actor state under the same write lock as acceptance. Any event
 /// the actor has not yet reflected in its summary makes the snapshot inconclusive.
 fn snapshots_quiet(
@@ -145,7 +174,8 @@ fn snapshots_quiet(
     session: &str,
     result_seq: i64,
     now: i64,
-) -> Result<bool> {
+) -> Result<QuietCheck> {
+    let mut recheck_at = None;
     for row in sql::guard_statuses(
         conn,
         sql::GuardStatusesParams {
@@ -154,7 +184,7 @@ fn snapshots_quiet(
         },
     )? {
         let Some(raw) = row.payload else {
-            return Ok(false);
+            return Ok(QuietCheck::Blocked);
         };
         let status: boblm_protocol::client::SessionStatus =
             serde_json::from_str(&raw).map_err(std::io::Error::other)?;
@@ -166,30 +196,37 @@ fn snapshots_quiet(
             || status.dispatching != 0
             || (row.id == session && status.uncertain != 0)
             || (row.id == session && status.rejected != 0)
-            || !jobs_quiet(conn, &row.id, status.running, status.jobs.as_ref(), now)?
             || row.unpublished != Some(0)
         {
-            return Ok(false);
+            return Ok(QuietCheck::Blocked);
+        }
+        match jobs_quiet(conn, &row.id, status.running, status.jobs.as_ref(), now)? {
+            QuietCheck::Blocked => return Ok(QuietCheck::Blocked),
+            QuietCheck::RecentJobsUntil(until) => {
+                recheck_at = Some(recheck_at.unwrap_or(until).max(until));
+            }
+            QuietCheck::Quiet => {}
         }
     }
-    Ok(true)
+    Ok(recheck_at.map_or(QuietCheck::Quiet, QuietCheck::RecentJobsUntil))
 }
 
-/// The same age rule guards serialized status reads and acceptance under the write lock.
+/// Recent jobs provide a deadline; missing inventories or ages cannot justify deferral.
 fn jobs_quiet(
     conn: &rusqlite::Connection,
     session: &str,
     running: bool,
     jobs: Option<&boblm_protocol::jobs::JobSnapshot>,
     now: i64,
-) -> Result<bool> {
+) -> Result<QuietCheck> {
     if !running {
-        return Ok(true);
+        return Ok(QuietCheck::Quiet);
     }
     let Some(jobs) = jobs.filter(|jobs| jobs.available) else {
-        return Ok(false);
+        return Ok(QuietCheck::Blocked);
     };
     let cutoff = now.saturating_sub(boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64);
+    let mut recheck_at = None;
     for job in &jobs.tasks {
         let first_seen = sql::job_first_seen(
             conn,
@@ -200,11 +237,18 @@ fn jobs_quiet(
         )?
         .pop();
         // Missing evidence cannot establish that a job is long-lived.
-        if first_seen.is_none_or(|seen| seen >= cutoff) {
-            return Ok(false);
+        let Some(first_seen) = first_seen else {
+            return Ok(QuietCheck::Blocked);
+        };
+        if first_seen >= cutoff {
+            // The exact window boundary still blocks, so check one millisecond later.
+            let until = first_seen
+                .saturating_add(boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64)
+                .saturating_add(1);
+            recheck_at = Some(recheck_at.unwrap_or(until).max(until));
         }
     }
-    Ok(true)
+    Ok(recheck_at.map_or(QuietCheck::Quiet, QuietCheck::RecentJobsUntil))
 }
 
 /// Retained native lifecycle events also cover chats whose runners predate role subagents.

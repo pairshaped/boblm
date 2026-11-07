@@ -7,10 +7,17 @@ use marmot::MutationConnection;
 #[derive(Debug)]
 pub struct DueParams {
     pub cutoff: i64,
+    pub now: i64,
 }
 
 const DUE_SQL: &str = r"SELECT session, result_seq, created_at, state, message_id FROM idle_nudges
-WHERE (state = 'pending' AND created_at <= ?1) OR state = 'queued'
+WHERE state = 'pending' AND recheck_at IS NULL AND created_at <= ?1
+UNION ALL
+SELECT session, result_seq, created_at, state, message_id FROM idle_nudges
+WHERE state = 'pending' AND recheck_at <= ?2
+UNION ALL
+SELECT session, result_seq, created_at, state, message_id FROM idle_nudges
+WHERE state = 'queued'
 ORDER BY created_at, session, result_seq";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,7 +31,7 @@ pub struct DueRow {
 
 pub fn due(conn: &Connection, params: DueParams) -> Result<Vec<DueRow>> {
     let mut stmt = conn.prepare_cached(DUE_SQL)?;
-    let rows = stmt.query_map(params![params.cutoff], |row| {
+    let rows = stmt.query_map(params![params.cutoff, params.now], |row| {
         Ok(DueRow {
             session: row.get(0)?,
             result_seq: row.get(1)?,
@@ -83,6 +90,24 @@ pub fn settle(conn: impl MutationConnection, params: SettleParams<'_>) -> Result
             params.session,
             params.result_seq
         ],
+    )
+}
+
+#[derive(Debug)]
+pub struct DeferParams<'a> {
+    pub recheck_at: Option<i64>,
+    pub session: &'a str,
+    pub result_seq: i64,
+}
+
+const DEFER_SQL: &str = r"UPDATE idle_nudges SET recheck_at = ?1
+WHERE session = ?2 AND result_seq = ?3 AND state = 'pending'";
+
+pub fn defer(conn: impl MutationConnection, params: DeferParams<'_>) -> Result<usize> {
+    let conn = conn.as_connection();
+    conn.execute(
+        DEFER_SQL,
+        params![params.recheck_at, params.session, params.result_seq],
     )
 }
 

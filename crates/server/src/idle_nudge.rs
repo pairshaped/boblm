@@ -55,38 +55,17 @@ fn child_quiet(status: &Status) -> bool {
     !status.turn_active && !status.stopping && status.queued == 0 && status.dispatching == 0
 }
 
-impl App {
-    async fn idle_nudge_status_quiet(
-        &self,
-        session: &str,
-        status: Status,
-        child: bool,
-        now: i64,
-    ) -> Result<bool, String> {
-        if !(if child {
-            child_quiet(&status)
-        } else {
-            quiet(&status)
-        }) {
-            return Ok(false);
-        }
-        let session = session.to_owned();
-        self.blocking("check the idle nudge's job ages", move |store| {
-            store.reader()?.idle_nudge_jobs_quiet(
-                &session,
-                status.running,
-                status.jobs.as_ref(),
-                now,
-            )
-        })
-        .await
-    }
+// Job ages are checked with the persisted summaries under the acceptance lock.
+// A live unavailable inventory still blocks even if an older summary was quiet.
+fn jobs_available(status: &Status) -> bool {
+    !status.running || status.jobs.as_ref().is_some_and(|jobs| jobs.available)
+}
 
+impl App {
     pub(crate) async fn run_idle_nudges(&self, now: i64) -> Result<(), String> {
-        let cutoff = now.saturating_sub(boblm_tuning::IDLE_NUDGE_DELAY.as_millis() as i64);
         let due = self
             .blocking("read due idle nudges", move |store| {
-                store.reader()?.due_idle_nudges(cutoff)
+                store.reader()?.due_idle_nudges(now)
             })
             .await?;
         for nudge in due {
@@ -98,10 +77,7 @@ impl App {
             if nudge.state == "pending" {
                 let root_quiet = if let Some(handle) = &handle {
                     match handle.status().await {
-                        Ok(status) => {
-                            self.idle_nudge_status_quiet(&session, status, false, now)
-                                .await?
-                        }
+                        Ok(status) => quiet(&status) && jobs_available(&status),
                         Err(_) => false,
                     }
                 } else {
@@ -134,10 +110,7 @@ impl App {
                         for child in children {
                             let child_quiet = match self.handle(&child).await {
                                 Ok(handle) => match handle.status().await {
-                                    Ok(status) => {
-                                        self.idle_nudge_status_quiet(&child, status, true, now)
-                                            .await?
-                                    }
+                                    Ok(status) => child_quiet(&status) && jobs_available(&status),
                                     Err(_) => false,
                                 },
                                 Err(_) => false,
@@ -514,6 +487,171 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn idle_nudge_recent_job_defers_then_fires_once() {
+        let mut h = Harness::new().await;
+        let seq = h.job_turn().await;
+        let now = h.due_time(seq);
+        h.store
+            .record_event(
+                "root",
+                "agent_event",
+                serde_json::to_value(Event::BackgroundJobs {
+                    snapshot: job_snapshot(&["older"]),
+                })
+                .unwrap(),
+                now - 10_000,
+            )
+            .unwrap();
+        let snapshot = job_snapshot(&["older", "watcher"]);
+        h.store
+            .record_event(
+                "root",
+                "agent_event",
+                serde_json::to_value(Event::BackgroundJobs {
+                    snapshot: snapshot.clone(),
+                })
+                .unwrap(),
+                now,
+            )
+            .unwrap();
+        publish_jobs(&h.handle, &h.events, snapshot).await;
+        h.app.run_idle_nudges(now).await.unwrap();
+        assert_eq!(h.nudge_count(), 0);
+        assert!(
+            h.store
+                .reader()
+                .unwrap()
+                .due_idle_nudges(i64::MAX)
+                .unwrap()
+                .iter()
+                .any(|n| n.result_seq == seq),
+            "recent jobs must leave the opportunity pending"
+        );
+        let boundary = now + boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64;
+        assert!(
+            h.store
+                .reader()
+                .unwrap()
+                .due_idle_nudges(boundary)
+                .unwrap()
+                .is_empty()
+        );
+        h.app.run_idle_nudges(boundary).await.unwrap();
+        assert_eq!(h.nudge_count(), 0);
+        h.app.run_idle_nudges(boundary + 1).await.unwrap();
+        assert_eq!(h.input().await.1, boblm_tuning::IDLE_NUDGE_TEXT);
+        h.app.run_idle_nudges(i64::MAX).await.unwrap();
+        assert_eq!(h.nudge_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn idle_nudge_completed_job_drops_deferred_opportunity() {
+        for finish_before_recheck in [false, true] {
+            let mut h = Harness::new().await;
+            let seq = h.job_turn().await;
+            let now = h.due_time(seq);
+            publish_jobs(&h.handle, &h.events, job_snapshot(&["watcher"])).await;
+            h.app.run_idle_nudges(now).await.unwrap();
+            assert!(
+                h.store
+                    .reader()
+                    .unwrap()
+                    .due_idle_nudges(i64::MAX)
+                    .unwrap()
+                    .iter()
+                    .any(|n| n.result_seq == seq)
+            );
+
+            publish_jobs(&h.handle, &h.events, job_snapshot(&[])).await;
+            let (notice, text) = h.input().await;
+            assert!(text.starts_with("Background command is no longer listed as running:"));
+            h.events
+                .send(Event::CommandLifecycle {
+                    command_uuid: notice.clone(),
+                    state: LifecycleState::Started,
+                })
+                .unwrap();
+            // A consumed notice starts work before the old deferred opportunity is due.
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if h.handle.status().await.unwrap().turn_active {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            if finish_before_recheck {
+                let later = h.finish(&notice).await;
+                assert!(later > seq);
+                // The new result can have its own opportunity. Settle only the old one
+                // to prove later activity drops it even after the runner becomes quiet.
+                assert!(
+                    !h.store
+                        .prepare_idle_nudge("root", seq, &message_id("root", seq), true, i64::MAX)
+                        .unwrap()
+                );
+            } else {
+                h.app.run_idle_nudges(i64::MAX).await.unwrap();
+            }
+            assert_eq!(h.nudge_count(), 0);
+            assert!(
+                !h.store
+                    .reader()
+                    .unwrap()
+                    .due_idle_nudges(i64::MAX)
+                    .unwrap()
+                    .iter()
+                    .any(|n| n.result_seq == seq)
+            );
+            // The dropped opportunity cannot be revived by another acceptance attempt.
+            assert!(
+                !h.store
+                    .prepare_idle_nudge("root", seq, &message_id("root", seq), true, i64::MAX)
+                    .unwrap()
+            );
+            assert_eq!(h.nudge_count(), 0);
+            assert!(h.inputs.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn idle_nudge_recent_job_and_question_drop_permanently() {
+        for acceptance_only in [false, true] {
+            let mut h = Harness::new().await;
+            let seq = h.job_turn().await;
+            let now = h.due_time(seq);
+            publish_jobs(&h.handle, &h.events, job_snapshot(&["watcher"])).await;
+            h.store.ask("q", "root", "Choose?", &[], now).unwrap();
+            if acceptance_only {
+                assert!(
+                    !h.store
+                        .prepare_idle_nudge("root", seq, &message_id("root", seq), true, now)
+                        .unwrap()
+                );
+            } else {
+                h.app.run_idle_nudges(now).await.unwrap();
+            }
+            assert!(
+                !h.store
+                    .reader()
+                    .unwrap()
+                    .due_idle_nudges(i64::MAX)
+                    .unwrap()
+                    .iter()
+                    .any(|n| n.result_seq == seq)
+            );
+            h.store
+                .discuss_question_later("q", "root", now + 1)
+                .unwrap();
+            h.app.run_idle_nudges(i64::MAX).await.unwrap();
+            assert_eq!(h.nudge_count(), 0);
+            assert!(h.inputs.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
     async fn idle_nudge_long_lived_job_does_not_block() {
         let mut h = Harness::new().await;
         let seq = h.job_turn().await;
@@ -635,9 +773,27 @@ mod tests {
             )
             .unwrap();
         publish_jobs(&h.handle, &h.events, snapshot.clone()).await;
+        h.app.run_idle_nudges(now).await.unwrap();
         let reopened = Store::open(h.store.path()).unwrap();
+        assert!(
+            reopened
+                .reader()
+                .unwrap()
+                .due_idle_nudges(i64::MAX)
+                .unwrap()
+                .iter()
+                .any(|n| n.result_seq == seq)
+        );
         let window = boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64;
         for check_at in [now, now + window - 1, now + window] {
+            assert!(
+                reopened
+                    .reader()
+                    .unwrap()
+                    .due_idle_nudges(check_at)
+                    .unwrap()
+                    .is_empty()
+            );
             assert!(
                 !reopened
                     .reader()
@@ -665,8 +821,39 @@ mod tests {
                 )
                 .unwrap()
         );
+        // A second reopen after acceptance must see the same queued receipt.
+        let restarted = Store::open(h.store.path()).unwrap();
+        assert!(
+            restarted
+                .prepare_idle_nudge(
+                    "root",
+                    seq,
+                    &message_id("root", seq),
+                    true,
+                    now + window + 1
+                )
+                .unwrap()
+        );
         h.app.run_idle_nudges(now + window + 1).await.unwrap();
-        assert_eq!(h.input().await.1, boblm_tuning::IDLE_NUDGE_TEXT);
+        let (id, text) = h.input().await;
+        assert_eq!(text, boblm_tuning::IDLE_NUDGE_TEXT);
+        // Leave the watcher listed so finishing the nudge does not create a real job wake.
+        h.events
+            .send(Event::CommandLifecycle {
+                command_uuid: id,
+                state: LifecycleState::Started,
+            })
+            .unwrap();
+        h.events
+            .send(Event::Result {
+                subtype: None,
+                is_error: Some(false),
+            })
+            .unwrap();
+        h.settled().await;
+        h.app.run_idle_nudges(i64::MAX).await.unwrap();
+        assert_eq!(h.nudge_count(), 1);
+        assert!(h.inputs.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -766,6 +953,32 @@ mod tests {
                     usize::from(!recent),
                     "recent: {recent}, acceptance only: {acceptance_only}"
                 );
+                if recent {
+                    let boundary =
+                        first_seen + boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64;
+                    assert!(
+                        h.store
+                            .reader()
+                            .unwrap()
+                            .due_idle_nudges(i64::MAX)
+                            .unwrap()
+                            .iter()
+                            .any(|n| n.result_seq == seq)
+                    );
+                    assert!(
+                        h.store
+                            .reader()
+                            .unwrap()
+                            .due_idle_nudges(boundary)
+                            .unwrap()
+                            .iter()
+                            .all(|n| n.result_seq != seq)
+                    );
+                    h.app.run_idle_nudges(boundary + 1).await.unwrap();
+                    assert_eq!(h.input().await.1, boblm_tuning::IDLE_NUDGE_TEXT);
+                    h.app.run_idle_nudges(i64::MAX).await.unwrap();
+                    assert_eq!(h.nudge_count(), 1);
+                }
             }
         }
     }
@@ -823,7 +1036,6 @@ mod tests {
     #[tokio::test]
     async fn idle_nudge_drops_blocked_opportunities_permanently() {
         for blocker in [
-            "job",
             "unavailable",
             "question",
             "queued",
@@ -836,20 +1048,12 @@ mod tests {
             let mut h = Harness::new().await;
             let seq = h.job_turn().await;
             match blocker {
-                "job" | "unavailable" => {
+                "unavailable" => {
                     h.events
                         .send(Event::BackgroundJobs {
                             snapshot: JobSnapshot {
-                                available: blocker != "unavailable",
-                                tasks: if blocker == "job" {
-                                    vec![BackgroundJob {
-                                        id: "next".into(),
-                                        command: "work".into(),
-                                        agent_key: None,
-                                    }]
-                                } else {
-                                    vec![]
-                                },
+                                available: false,
+                                tasks: vec![],
                             },
                         })
                         .unwrap();

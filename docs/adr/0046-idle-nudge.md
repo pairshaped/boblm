@@ -78,7 +78,17 @@ or recent listed jobs. An idle child held while waiting for its parent does not
 supply a future wake and does not block a nudge. Unanswered `ask` questions anywhere
 under the root and pending child reports suppress the nudge. New input or turn
 activity after the triggering result suppresses it, even when that intervening
-work has already ended. Suppression settles this opportunity permanently.
+work has already ended. These blockers settle the opportunity as `dropped`
+permanently.
+
+If recent listed jobs are the only blockers, BobLM keeps the opportunity pending.
+It rechecks one millisecond after the youngest blocking job's first-seen time plus
+`IDLE_NUDGE_RECENT_JOB_WINDOW`, because the exact window boundary still blocks.
+This applies to jobs on the root and its open children. Every other guard must
+pass before BobLM defers, including available snapshots and quiet child turns.
+If a job finishes before the recheck, the runner's completion notice supplies new
+input and starts a turn. That later activity drops the old opportunity even if
+the new turn has already ended when the recheck runs.
 
 Acceptance takes the SQLite write lock and rechecks delivery, Stop, archive,
 questions, pending reports and newer activity. It checks the latest durable actor
@@ -91,6 +101,8 @@ inventories still make an unpublished snapshot inconclusive, even if every liste
 job is old. The root's triggering result is already covered by the serialized
 status read. This guards against owner input, a new
 child, a job update or a child starting work during the scheduler's earlier reads.
+A recent job in one snapshot cannot hide another blocker in a later snapshot;
+acceptance checks all root and child guards before recording a deferral.
 Retained native Agent/Task and Codex SubagentActivity lifecycle events also guard
 legacy children that have no BobLM child-session row. Incomplete or unknown native
 lifecycle state suppresses the opportunity.
@@ -115,6 +127,16 @@ acceptance leaves a pending opportunity; a crash after acceptance leaves the sam
 queued message for handoff. A crash after handoff can repeat the duplicate receipt
 but cannot create a second message or repeat consumed input.
 
+A deferred opportunity stores its next check time in `idle_nudges.recheck_at`.
+An index on state, recheck time and creation time lets the scheduler read only
+initial opportunities whose delay has elapsed, deferred opportunities whose
+recheck time has arrived, and queued messages awaiting handoff. Deferred rows
+stay out of each tick's result set until their deadline. The deadline commits
+under the acceptance write lock and survives a web restart. Repeated checks use
+the same opportunity and message UUID. The add-only migration adds the nullable
+column and its index without scanning historical events or reviving dropped
+opportunities.
+
 A web restart preserves live runner state and durable first-seen times. The job-age
 migration seeds the latest inventory of each chat at migration time, so an
 existing job with no recorded age blocks for a full window. Unknown ages always
@@ -128,6 +150,6 @@ A turn started by the nudge has no eligible origin and cannot create a chain.
 The migrations add durable opportunities and job observations with event triggers.
 Loaded runners continue writing their existing SQL. Opportunities and job
 observations disappear with their chat. Fake-driver tests cover origins, quiet
-blockers, job ages in roots and children, mixed inventories, restart behavior,
-one-shot timing, automated provenance, chain prevention and interrupted
-acceptance or handoff.
+blockers, job ages and deferrals in roots and children, mixed inventories,
+completion notices during deferral, restart behavior, one-shot timing, automated
+provenance, chain prevention and interrupted acceptance or handoff.
