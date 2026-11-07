@@ -43,12 +43,14 @@ and scripted checks. Reviewers do independent code review; implementers own hard
 implementation and repairs that need judgment, such as concurrency, delivery or
 state-machine logic and cross-module design.
 
-1. Terra on the Codex plan while its weekly allowance has room, medium.
+1. DeepSeek V4.1 Flash 1017 through Pi, high.
 2. Haiku on the Claude plan while its weekly allowance has room, high.
 
-Grunt work uses subscription allowances only. Haiku has no R reserve, so it
-remains available until the Claude weekly allowance is exhausted. Missing or
-expired readings count as available, as they do for the other plan steps.
+DeepSeek is paid per use and has no allowance window, so grunts reach Haiku only
+while DeepSeek is marked exhausted after a quota or billing rejection. Haiku has no
+R reserve, so it remains available until the Claude weekly allowance is exhausted.
+Missing or expired readings count as available, as they do for the other plan steps.
+Terra is not a grunt step: its grunt work needed too much correction.
 
 Decision 44 removed the implementer's OpenAI API step for now. The API credit is
 for Luna reviews only, so its depletion rate can be measured. The API project also

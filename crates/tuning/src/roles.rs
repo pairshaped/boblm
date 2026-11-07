@@ -104,7 +104,7 @@ pub enum StepId {
     ReviewerOpenAiApi,
     ReviewerCodexPlan,
     ReviewerDeepSeek,
-    GruntCodexPlan,
+    GruntDeepSeek,
     GruntClaude,
     PlannerClaude,
 }
@@ -119,7 +119,7 @@ impl StepId {
             "reviewer-codex-plan" => Some(Self::ReviewerCodexPlan),
             "reviewer-openai-api" => Some(Self::ReviewerOpenAiApi),
             "reviewer-deepseek" => Some(Self::ReviewerDeepSeek),
-            "grunt-codex-plan" => Some(Self::GruntCodexPlan),
+            "grunt-deepseek" => Some(Self::GruntDeepSeek),
             "grunt-claude" => Some(Self::GruntClaude),
             "planner-claude" => Some(Self::PlannerClaude),
             _ => None,
@@ -130,12 +130,13 @@ impl StepId {
         match self {
             Self::ImplementerCodexPlan
             | Self::ImplementerCodexCredits
-            | Self::ReviewerCodexPlan
-            | Self::GruntCodexPlan => AccountKind::CodexPlan,
+            | Self::ReviewerCodexPlan => AccountKind::CodexPlan,
             Self::ImplementerClaude | Self::GruntClaude | Self::PlannerClaude => {
                 AccountKind::ClaudePlan
             }
-            Self::ImplementerDeepSeek | Self::ReviewerDeepSeek => AccountKind::DeepSeek,
+            Self::ImplementerDeepSeek | Self::ReviewerDeepSeek | Self::GruntDeepSeek => {
+                AccountKind::DeepSeek
+            }
             Self::ReviewerOpenAiApi => AccountKind::OpenAiApi,
         }
     }
@@ -149,7 +150,7 @@ impl StepId {
             Self::ReviewerCodexPlan => "reviewer-codex-plan",
             Self::ReviewerOpenAiApi => "reviewer-openai-api",
             Self::ReviewerDeepSeek => "reviewer-deepseek",
-            Self::GruntCodexPlan => "grunt-codex-plan",
+            Self::GruntDeepSeek => "grunt-deepseek",
             Self::GruntClaude => "grunt-claude",
             Self::PlannerClaude => "planner-claude",
         }
@@ -164,7 +165,7 @@ impl StepId {
             Self::ReviewerCodexPlan => "Codex plan allowance",
             Self::ReviewerOpenAiApi => "OpenAI API credit",
             Self::ReviewerDeepSeek => "DeepSeek fallback",
-            Self::GruntCodexPlan => "Codex plan allowance",
+            Self::GruntDeepSeek => "DeepSeek pay-per-use",
             Self::GruntClaude => "Claude plan allowance",
             Self::PlannerClaude => "Claude plan allowance",
         }
@@ -182,7 +183,7 @@ impl StepId {
                 | Self::ReviewerOpenAiApi
                 | Self::ReviewerCodexPlan
                 | Self::ReviewerDeepSeek
-                | Self::GruntCodexPlan
+                | Self::GruntDeepSeek
                 | Self::GruntClaude
                 | Self::PlannerClaude
         )
@@ -254,14 +255,14 @@ pub const REVIEWER_STEPS: &[RoleStep] = &[
     },
 ];
 
-/// Mechanical work uses subscription allowances, with Haiku as its last resort.
+/// Grunt work runs on pay-per-use DeepSeek, with Haiku when DeepSeek is marked exhausted.
 pub const GRUNT_STEPS: &[RoleStep] = &[
     RoleStep {
-        id: StepId::GruntCodexPlan,
-        model: MODEL_GPT_6_1_TERRA,
-        simple_effort: ROLE_GRUNT_TERRA_EFFORT,
-        hard_effort: ROLE_GRUNT_TERRA_EFFORT,
-        account: AccountKind::CodexPlan,
+        id: StepId::GruntDeepSeek,
+        model: MODEL_DEEPSEEK_V41_FLASH,
+        simple_effort: ROLE_GRUNT_DEEPSEEK_EFFORT,
+        hard_effort: ROLE_GRUNT_DEEPSEEK_EFFORT,
+        account: AccountKind::DeepSeek,
     },
     RoleStep {
         id: StepId::GruntClaude,
@@ -539,7 +540,6 @@ fn resolve_with(
             StepId::ImplementerClaude => claude_reason(reading, now),
             StepId::ImplementerCodexPlan
             | StepId::ReviewerCodexPlan
-            | StepId::GruntCodexPlan
             | StepId::GruntClaude
             | StepId::PlannerClaude => weekly_plan_reason(step.account, reading, now),
             StepId::ImplementerCodexCredits => codex_credits_reason(reading),
@@ -548,6 +548,7 @@ fn resolve_with(
                 "{} is the last step and has no allowance window.",
                 step.id.label()
             )),
+            StepId::GruntDeepSeek => Ok(format!("{} has no allowance window.", step.id.label())),
         };
         match reason {
             Ok(reason) => {
@@ -1181,7 +1182,7 @@ mod tests {
     }
 
     #[test]
-    fn grunt_chain_uses_plan_allowances_without_the_sonnet_reserve_or_api_credit() {
+    fn grunt_chain_uses_deepseek_then_haiku_without_the_sonnet_reserve_or_api_credit() {
         let now = 1_000_000;
         let reset = now + 7 * 86_400;
         let full_api = ApiHeadroom {
@@ -1189,67 +1190,49 @@ mod tests {
             projected_tokens: u64::MAX,
             active_reviewers: OPENAI_API_MAX_ACTIVE_REVIEWERS,
         };
-        for (codex_used, codex_reset, claude_used, claude_reset, expected) in [
-            (None, None, None, None, Some(StepId::GruntCodexPlan)),
+        let deepseek_out = [ExhaustedStep {
+            step: StepId::GruntDeepSeek,
+            until: now + 1,
+        }];
+        for (claude_used, claude_reset, marks, expected) in [
+            (None, None, &[][..], Some(StepId::GruntDeepSeek)),
             (
-                Some(0.0),
+                Some(100.0),
                 Some(reset),
-                Some(0.0),
-                Some(reset),
-                Some(StepId::GruntCodexPlan),
+                &[][..],
+                Some(StepId::GruntDeepSeek),
             ),
+            (None, None, &deepseek_out[..], Some(StepId::GruntClaude)),
             (
                 Some(99.9),
                 Some(reset),
-                Some(100.0),
-                Some(reset),
-                Some(StepId::GruntCodexPlan),
+                &deepseek_out[..],
+                Some(StepId::GruntClaude),
             ),
             (
                 Some(100.0),
                 Some(now),
-                Some(100.0),
-                Some(reset),
-                Some(StepId::GruntCodexPlan),
-            ),
-            (
-                Some(100.0),
-                Some(reset),
-                None,
-                None,
+                &deepseek_out[..],
                 Some(StepId::GruntClaude),
             ),
-            (
-                Some(100.0),
-                Some(reset),
-                Some(99.9),
-                Some(reset),
-                Some(StepId::GruntClaude),
-            ),
-            (
-                Some(100.0),
-                Some(reset),
-                Some(100.0),
-                Some(now),
-                Some(StepId::GruntClaude),
-            ),
-            (Some(100.0), Some(reset), Some(100.0), Some(reset), None),
+            (Some(100.0), Some(reset), &deepseek_out[..], None),
         ] {
+            // Plan allowances other than Claude's never affect grunt routing.
             let readings = [
-                reading(AccountKind::CodexPlan, codex_used, codex_reset, Some(100.0)),
+                reading(AccountKind::CodexPlan, Some(100.0), Some(reset), Some(0.0)),
                 reading(AccountKind::ClaudePlan, claude_used, claude_reset, None),
             ];
             // Fixed efforts apply to this role regardless of the internal difficulty placeholder.
             for difficulty in [Difficulty::Simple, Difficulty::Hard] {
-                let outcome = resolve(Role::Grunt, difficulty, &readings, &[], full_api, now);
+                let outcome = resolve(Role::Grunt, difficulty, &readings, marks, full_api, now);
                 match (expected, outcome) {
                     (Some(step), RouteOutcome::Chosen(route)) => {
                         assert_eq!(route.step, step);
                         assert_eq!(route.account, step.account());
                         match step {
-                            StepId::GruntCodexPlan => {
-                                assert_eq!(route.model, MODEL_GPT_6_1_TERRA);
-                                assert_eq!(route.effort, ROLE_GRUNT_TERRA_EFFORT);
+                            StepId::GruntDeepSeek => {
+                                assert_eq!(route.model, MODEL_DEEPSEEK_V41_FLASH);
+                                assert_eq!(route.effort, ROLE_GRUNT_DEEPSEEK_EFFORT);
                             }
                             StepId::GruntClaude => {
                                 assert_eq!(route.model, MODEL_HAIKU);
@@ -1262,11 +1245,6 @@ mod tests {
                     }
                     (None, RouteOutcome::Exhausted(reasons)) => {
                         assert_eq!(reasons.len(), GRUNT_STEPS.len());
-                        assert!(
-                            reasons
-                                .iter()
-                                .all(|reason| reason.reason.contains("has not reset"))
-                        );
                     }
                     (expected, outcome) => panic!("expected {expected:?}, got {outcome:?}"),
                 }
@@ -1278,16 +1256,8 @@ mod tests {
             assert_eq!(StepId::parse(step.id.as_str()), Some(step.id));
             assert_ne!(step.account, AccountKind::OpenAiApi);
         }
-        let marks = [ExhaustedStep {
-            step: StepId::GruntCodexPlan,
-            until: now + 1,
-        }];
-        let RouteOutcome::Chosen(route) =
-            resolve(Role::Grunt, Difficulty::Simple, &[], &marks, full_api, now)
-        else {
-            panic!()
-        };
-        assert_eq!(route.step, StepId::GruntClaude);
+        // Receipts from the retired Terra step no longer parse, so old marks are skipped.
+        assert_eq!(StepId::parse("grunt-codex-plan"), None);
     }
 
     #[test]

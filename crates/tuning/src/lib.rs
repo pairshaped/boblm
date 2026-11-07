@@ -222,10 +222,10 @@ pub const MAX_WORKING_DIRECTORY_CHARS: u32 = 4096;
 pub const MIN_SCHEDULE_INTERVAL: Duration = Duration::from_secs(60);
 /// How long a role step with no known reset is skipped after a quota or billing rejection.
 pub const ROLE_EXHAUSTION_RETRY: Duration = Duration::from_secs(60 * 60);
+/// Effort for DeepSeek grunt work, paid per use through Pi.
+pub const ROLE_GRUNT_DEEPSEEK_EFFORT: &str = "high";
 /// Effort for Haiku grunt work on the Claude plan.
 pub const ROLE_GRUNT_HAIKU_EFFORT: &str = "high";
-/// Effort for Terra grunt work on the Codex plan.
-pub const ROLE_GRUNT_TERRA_EFFORT: &str = "medium";
 /// Effort for a hard implementer subagent on every routed implementer model.
 pub const ROLE_IMPLEMENTER_HARD_EFFORT: &str = "high";
 /// Effort for a simple implementer subagent on every routed implementer model.
@@ -244,7 +244,7 @@ pub const ROLE_SUBAGENTS_ENABLED: bool = true;
 pub const MODEL_DEEPSEEK_V41_FLASH: &str = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
 /// Model ID for GPT-6.1 Sol, used by the Codex routing steps.
 pub const MODEL_GPT_6_1_SOL: &str = "gpt-6.1-sol";
-/// Model ID for GPT-6.1 Terra, used for mechanical work.
+/// Model ID for GPT-6.1 Terra.
 pub const MODEL_GPT_6_1_TERRA: &str = "gpt-6.1-terra";
 /// Model ID for GPT-6 Luna, used by the reviewer API step.
 pub const MODEL_GPT_6_LUNA: &str = "gpt-6-luna";

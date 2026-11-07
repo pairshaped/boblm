@@ -2197,7 +2197,7 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
 }
 
 #[tokio::test]
-async fn grunt_spawns_accept_no_difficulty_and_preserve_their_subscription_routes() {
+async fn grunt_spawns_accept_no_difficulty_and_route_deepseek_then_haiku() {
     let temp = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
     let store = Store::open(temp.path().join("grunt-routing.sqlite")).unwrap();
     store
@@ -2232,22 +2232,22 @@ async fn grunt_spawns_accept_no_difficulty_and_preserve_their_subscription_route
     let child = tool_value(&call(&router, token, "caller", "spawn_subagent", args.clone()).await);
     assert_eq!(child["session"]["role"], "grunt");
     assert_eq!(child["session"]["parentSessionId"], "caller");
-    assert_eq!(child["routing"]["step"], "grunt-codex-plan");
-    assert_eq!(child["routing"]["model"], "gpt-6.1-terra");
-    assert_eq!(child["routing"]["effort"], "medium");
+    assert_eq!(child["routing"]["step"], "grunt-deepseek");
+    assert_eq!(
+        child["routing"]["model"],
+        boblm_tuning::MODEL_DEEPSEEK_V41_FLASH
+    );
+    assert_eq!(child["routing"]["effort"], "high");
     let sessions = store.reader().unwrap().sessions().unwrap();
     let saved = sessions
         .iter()
         .find(|session| session.id == args["requestId"].as_str().unwrap())
         .unwrap();
-    assert_eq!(
-        saved.account_key.as_deref(),
-        Some(boblm_tuning::CODEX_ACCOUNT_KEY_PLAN)
-    );
+    assert_eq!(saved.account_key, None);
 
     store
         .mark_role_step_exhausted(
-            boblm_tuning::StepId::GruntCodexPlan,
+            boblm_tuning::StepId::GruntDeepSeek,
             i64::MAX,
             1,
             "fixture quota",
