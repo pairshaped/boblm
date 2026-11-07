@@ -1,0 +1,16 @@
+{
+  "calls": [
+    {
+      "url": "/commands/chatHistory",
+      "body": "{\"sessionId\":\"profile-1000\"}"
+    },
+    {
+      "url": "/sessions/profile-1000/events",
+      "body": null,
+      "cursor": "1355"
+    }
+  ],
+  "resumeObservedMs": 756,
+  "draftPreserved": true,
+  "latestReplyVisible": true
+}

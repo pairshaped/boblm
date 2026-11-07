@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# A throwaway boblm server for work on boblm itself (ADR 0014), so restarting it
+# never kills the chats on the real server. It has its own port, token and database.
+#   bin/dev-instance start [--name NAME] [--port PORT] [--copy-db]
+#   bin/dev-instance restart|stop|status|token [--name NAME]
+# Builds first (web assets, then the server). restart builds before it stops the old
+# instance, so a failed build leaves it running. The config sets webRoot to web/dist,
+# so a web-only change needs `npm run build` in web/ and no restart at all.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+repo=$PWD
+
+home=${BOBLM_DEV_HOME:-$HOME/.local/share/boblm-dev}
+live_db=${BOBLM_LIVE_DB:-$HOME/.local/share/boblm/boblm.sqlite}
+bin=${BOBLM_DEV_BIN:-$repo/target/debug/boblm}
+name=dev
+port=3017
+copy_db=0
+
+die() { echo "$*" >&2; exit 1; }
+
+command=${1:-}
+[[ -n $command ]] && shift
+while (($#)); do
+  case $1 in
+    --name) name=${2:?--name needs a value}; shift 2 ;;
+    --port) port=${2:?--port needs a value}; shift 2 ;;
+    --copy-db) copy_db=1; shift ;;
+    *) die "Unknown option $1. Usage: bin/dev-instance {start|restart|stop|status|token} [--name NAME] [--port PORT] [--copy-db]" ;;
+  esac
+done
+[[ $name =~ ^[A-Za-z0-9_-]+$ ]] || die "The name may only contain letters, digits, dashes and underscores."
+[[ $port =~ ^[0-9]+$ ]] || die "The port must be a number."
+
+dir=$home/$name
+config=$dir/boblm.json
+db=$dir/data/boblm.sqlite
+log=$dir/server.log
+pidfile=$dir/server.pid
+
+running_pid() {
+  local pid
+  [[ -f $pidfile ]] && pid=$(<"$pidfile") || return 1
+  # The pid must still be our server: a recycled pid is never killed.
+  [[ -r /proc/$pid/cmdline ]] && tr '\0' ' ' </proc/$pid/cmdline | grep -qF -- "$config" && echo "$pid"
+}
+
+config_port() { sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$config"; }
+
+make_config() {
+  [[ -e $config ]] && return
+  [[ $db != "$live_db" ]] || die "The dev database would be the live database; refusing."
+  install -d -m 700 "$dir" "$dir/data"
+  local token
+  token=$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')
+  (umask 077; printf '{\n  "token": "%s",\n  "database": "%s",\n  "port": %s,\n  "webRoot": "%s"\n}\n' \
+    "$token" "$db" "$port" "$repo/web/dist" >"$config")
+  chmod 600 "$config"
+  if ((copy_db)); then
+    [[ -r $live_db ]] || die "Cannot read $live_db to copy it."
+    sqlite3 -readonly "$live_db" ".backup '$db'"
+    chmod 600 "$db"
+    echo "Copied the live chats. Do not resume the same chat here and on the real server: both would drive one agent session."
+  fi
+  echo "Created $config. Token: $token"
+}
+
+build() {
+  [[ ${BOBLM_DEV_NO_BUILD:-} == 1 ]] && return
+  (cd web && npm run build >/dev/null)
+  cargo build -j4 --workspace
+}
+
+port_busy() { ss -ltn "sport = :$1" 2>/dev/null | grep -q LISTEN; }
+
+start() {
+  running_pid >/dev/null && die "Dev instance '$name' is already running (pid $(running_pid)). Use restart."
+  build
+  make_config
+  port=$(config_port)
+  port_busy "$port" && die "Port $port is already in use. Pick another with --port when creating the instance, or stop what is listening."
+  # A fresh log per run means a stale "listening" line cannot satisfy readiness.
+  : > "$log"
+  setsid "$bin" serve --config "$config" >>"$log" 2>&1 </dev/null &
+  echo $! >"$pidfile"
+  for _ in $(seq 1 100); do
+    grep -q "listening on" "$log" 2>/dev/null && break
+    kill -0 "$(<"$pidfile")" 2>/dev/null || die "The dev server exited at startup. See $log."
+    sleep 0.1
+  done
+  echo "Dev instance '$name' is running (pid $(<"$pidfile")) at http://127.0.0.1:$port"
+  echo "From another device: tailscale serve --bg --https=$((port + 5000)) http://127.0.0.1:$port"
+}
+
+stop_web() {
+  local pid
+  pid=$(running_pid) || { rm -f "$pidfile"; echo "Dev instance '$name' is not running."; return 0; }
+  kill "$pid"
+  for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$pidfile"
+  echo "Stopped dev instance '$name'."
+}
+
+stop() {
+  stop_web
+  if [[ -f $config ]]; then "$bin" stop-runners --config "$config"; fi
+}
+
+case $command in
+  start) start ;;
+  stop) stop ;;
+  restart) build; BOBLM_DEV_NO_BUILD=1; stop_web; start ;;
+  status)
+    if pid=$(running_pid); then echo "Dev instance '$name' is running (pid $pid) at http://127.0.0.1:$(config_port)"
+    else echo "Dev instance '$name' is not running."; exit 1; fi ;;
+  token) [[ -f $config ]] || die "Dev instance '$name' has no config yet; run start first."
+    sed -n 's/.*"token": *"\([^"]*\)".*/\1/p' "$config" ;;
+  *) die "Usage: bin/dev-instance {start|restart|stop|status|token} [--name NAME] [--port PORT] [--copy-db]" ;;
+esac

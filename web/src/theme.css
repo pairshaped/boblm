@@ -1,0 +1,58 @@
+/* Everything a fork is likely to restyle. Layout lives in style.css and uses these.
+   One value per line, alphabetical, so merges with upstream stay clean. */
+:root {
+  --color-agent-claude: #d99a7c;
+  --color-agent-codex: #8ab4f8;
+  --color-agent-pi: #b9a2ec;
+  --color-bg: #1a1a1a;
+  --color-border: #3d3d3d;
+  --color-caret: #d6d5d0;
+  --color-control-bg: #262626;
+  --color-control-border: #3d3d3d;
+  --color-control-hover: #333333;
+  --color-error-bg: #382420;
+  --color-error-text: #ffb6a7;
+  --color-failed-border: #8a4a4a;
+  --color-focus: #c4c3be;
+  --color-inline-code: #d97876;
+  --color-label-text: #c4c3be;
+  --color-muted: #85847e;
+  --color-muted-secondary: #85847e;
+  --color-new-messages-bg: #333333;
+  --color-question-badge-bg: #ff3b30;
+  --color-question-badge-text: #fff;
+  --color-selected-bg: #333333;
+  --color-selected-border: #85847e;
+  --color-shadow: #0008;
+  --color-sidebar-bg: #161616;
+  /* Faint fill on every other sidebar chat, to separate rows without lines. */
+  --color-sidebar-stripe: rgba(255, 255, 255, 0.035);
+  --color-surface: #272727;
+  --color-text: #d6d5d0;
+  --color-tool-message: #272727;
+  --color-usage-fill: #92918b;
+  --color-usage-high: #b47d79;
+  --color-user-message: #272727;
+  --font-family-chat:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-size-agent-message: 18px;
+  --font-size-base: 14px;
+  --font-size-chat: 21px;
+  --font-size-mobile-control: 16px;
+  --font-size-project-name: 19px;
+  --font-size-sidebar: 17px;
+  --font-size-sidebar-position: 13px;
+  --font-size-small: 12px;
+  --font-size-tiny: 11px;
+  --opacity-agent-message: var(--opacity-tool-summary);
+  --opacity-archived-chat: 0.4;
+  --opacity-empty-project: 0.4;
+  --opacity-idle-activity: 0.25;
+  --opacity-inactive-control: 0.25;
+  --opacity-tool-summary: 0.25;
+  --radius-bubble: 16px;
+  --width-drawer: 320px;
+  --width-right-drawer: 420px;
+  --size-control: 30px;
+  --width-messages: 1300px;
+}

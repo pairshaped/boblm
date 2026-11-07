@@ -1,0 +1,8 @@
+[package]
+name = "boblm-tuning"
+version = "0.1.0"
+edition = "2024"
+
+# No dependencies, so changing a value rebuilds quickly and a fork's edits stay
+# in this one crate.
+[dependencies]

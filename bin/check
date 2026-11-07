@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+mkdir -p target
+check_output=$(mktemp target/check-output.XXXXXX)
+trap 'rm -f "$check_output"' EXIT
+
+run_checks() (
+  set -euo pipefail
+  bin/test-prune-target
+  bin/test-restart
+  bin/test-dev-instance
+  echo '== Error wording =='
+  bin/check-messages
+  echo '== cargo fmt =='
+  cargo fmt -- --check
+  echo '== web build (embedded assets) =='
+  (cd web && npm run build)
+  echo '== cargo check =='
+  cargo check -j4 --workspace --all-targets
+  if [[ -f crates/store/Cargo.toml ]]; then
+    echo '== Marmot generated bindings =='
+    cargo run -j4 -p boblm-store --example store-generate -- --check
+  fi
+  echo '== Generated browser contract =='
+  cargo run -j4 -p boblm-protocol --example protocol-generate -- --check
+  echo '== cargo clippy =='
+  cargo clippy -j4 --workspace --all-targets -- -D warnings
+  echo '== cargo test =='
+  cargo test -j4 --workspace
+  if [[ -f web/package.json ]]; then
+    echo '== web typecheck =='
+    (cd web && npm run typecheck)
+    echo '== web tests =='
+    (cd web && npm test)
+  fi
+)
+
+# Capture Cargo's own diagnostics as well as compiler and check-tool output.
+# RUSTFLAGS cannot promote Cargo warnings such as colliding output filenames.
+set +e
+run_checks 2>&1 | tee "$check_output"
+check_status=("${PIPESTATUS[@]}")
+set -e
+if grep -q 'warning:' "$check_output"; then
+  echo 'check failed: warning: detected in check output' >&2
+  exit 1
+fi
+if (( check_status[0] != 0 )); then
+  exit "${check_status[0]}"
+fi
+if (( check_status[1] != 0 )); then
+  exit "${check_status[1]}"
+fi
+# Keep target/ bounded; silent unless it is over the limit.
+bin/prune-target --if-over
+echo 'check passed'

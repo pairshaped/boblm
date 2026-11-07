@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Behavior test for bin/prune-target against a fake target directory.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+work=$(mktemp -d "$here/../target/prune-test.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+fail() { echo "FAIL: $*"; exit 1; }
+old() { touch -d '30 days ago' "$@"; }
+mk() { # mk <file> <kilobytes>
+  mkdir -p "$(dirname "$1")"; head -c "$(($2 * 1024))" /dev/zero > "$1"
+}
+build() {
+  rm -rf "$work/t"; local t="$work/t"
+  mk "$t/debug/incremental/crate-a/data" 400
+  mk "$t/debug/deps/old.rlib" 400; old "$t/debug/deps/old.rlib"
+  mk "$t/debug/deps/fresh.rlib" 400
+  mk "$t/old.log" 10; old "$t/old.log"
+  mk "$t/new.log" 10
+  mkdir -p "$t/.tmpOLD" "$t/.tmpNEW"; old "$t/.tmpOLD"
+  touch "$t/CACHEDIR.TAG"; old "$t/CACHEDIR.TAG"
+  : > "$t/debug/.cargo-lock"
+}
+run() { BOBLM_TARGET_DIR="$work/t" BOBLM_TARGET_LIMIT_KB="$1" "$here/prune-target" "${@:2}"; }
+
+# Under the limit: only stale scratch goes.
+build; run 100000 >/dev/null
+[[ ! -e $work/t/old.log && ! -e $work/t/.tmpOLD ]] || fail "stale scratch should be removed"
+[[ -e $work/t/new.log && -e $work/t/.tmpNEW && -e $work/t/CACHEDIR.TAG ]] || fail "fresh scratch and CACHEDIR.TAG must stay"
+[[ -e $work/t/debug/incremental && -e $work/t/debug/deps/old.rlib ]] || fail "artifacts stay when under the limit"
+
+# Over the limit: incremental caches go first and are enough.
+build; run 1000 >/dev/null
+[[ ! -e $work/t/debug/incremental ]] || fail "incremental should be removed"
+[[ -e $work/t/debug/deps/old.rlib ]] || fail "stage 2 must not run once under the limit"
+
+# Still over: stale artifacts go, fresh ones stay.
+build; run 500 >/dev/null
+[[ ! -e $work/t/debug/deps/old.rlib ]] || fail "stale artifact should be removed"
+[[ -e $work/t/debug/deps/fresh.rlib ]] || fail "fresh artifact must stay"
+
+# Still over after the stale stage: the oldest fresh artifacts go until under the limit.
+build
+mk "$work/t/debug/deps/newest.rlib" 400
+touch -d '2 days ago' "$work/t/debug/deps/fresh.rlib"
+touch -d '1 day ago' "$work/t/debug/deps/newest.rlib"
+run 700 >/dev/null
+[[ ! -e $work/t/debug/deps/fresh.rlib ]] || fail "the oldest fresh artifact should go first"
+[[ -e $work/t/debug/deps/newest.rlib ]] || fail "the newest artifact must survive once under the limit"
+
+# --if-over is silent under the limit.
+build; [[ -z "$(run 100000 --if-over)" ]] || fail "--if-over should print nothing under the limit"
+
+# A running build (lock held) means nothing is deleted.
+build
+( exec 8>"$work/t/debug/.cargo-lock"; flock -n 8; sleep 3 ) &
+holder=$!; sleep 0.5
+out=$(run 1 || true)
+kill "$holder" 2>/dev/null || true; wait "$holder" 2>/dev/null || true
+[[ $out == *"holds the lock"* ]] || fail "should skip while a build holds the lock: $out"
+[[ -e $work/t/debug/incremental ]] || fail "nothing may be deleted under a lock"
+# A release build's lock protects the release artifacts too.
+build
+mk "$work/t/release/deps/rel.rlib" 400; old "$work/t/release/deps/rel.rlib"
+: > "$work/t/release/.cargo-lock"
+( exec 8>"$work/t/release/.cargo-lock"; flock -n 8; sleep 3 ) &
+holder=$!; sleep 0.5
+out=$(run 1 || true)
+kill "$holder" 2>/dev/null || true; wait "$holder" 2>/dev/null || true
+[[ $out == *"holds the lock"* ]] || fail "a release build lock must stop pruning: $out"
+[[ -e $work/t/release/deps/rel.rlib ]] || fail "release artifacts must survive a held release lock"
+
+# Hard links: every name of a file must go before its space is freed.
+build
+rm -rf "$work/t/debug/incremental" "$work/t/debug/deps"/*
+mk "$work/t/debug/deps/linked.rlib" 1024
+for n in 1 2 3 4 5; do ln "$work/t/debug/deps/linked.rlib" "$work/t/debug/deps/linked-$n.rlib"; done
+run 512 >/dev/null
+[[ $(du -sk "$work/t" | cut -f1) -le 512 ]] || fail "hard-linked artifacts should all be removed to reach the limit"
+
+# Fresh build-script output counts toward the limit too.
+build
+rm -rf "$work/t/debug/incremental" "$work/t/debug/deps"/*
+mk "$work/t/debug/build/pkg-abc/out/big.bin" 2048
+run 512 >/dev/null
+[[ ! -e $work/t/debug/build/pkg-abc/out/big.bin ]] || fail "build script output should be pruned when over the limit"
+
+# Never prune a directory that is not a Cargo target.
+rm -rf "$work/notatarget"; mkdir "$work/notatarget"
+mk "$work/notatarget/precious.log" 10; old "$work/notatarget/precious.log"
+if BOBLM_TARGET_DIR="$work/notatarget" BOBLM_TARGET_LIMIT_KB=1 "$here/prune-target" >/dev/null 2>&1; then
+  fail "a directory that is not a Cargo target must be refused"
+fi
+[[ -e $work/notatarget/precious.log ]] || fail "nothing may be deleted from a directory that is not a Cargo target"
+echo 'prune-target behaves'

@@ -1,0 +1,938 @@
+[
+  {
+    "type": "ChatPresenceReply",
+    "value": {
+      "reloadId": "10000000-0000-4000-8000-000000000001"
+    }
+  },
+  {
+    "type": "Empty",
+    "value": {}
+  },
+  {
+    "type": "ListDirectories",
+    "value": {
+      "path": null
+    }
+  },
+  {
+    "type": "DirectoryListing",
+    "value": {
+      "directories": [
+        {
+          "name": "projects",
+          "path": "/home/me/projects"
+        }
+      ],
+      "parent": null,
+      "path": "/home/me"
+    }
+  },
+  {
+    "type": "SessionRef",
+    "value": {
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "CreateSession",
+    "value": {
+      "effort": null,
+      "model": "sonnet",
+      "projectId": "20000000-0000-4000-8000-000000000001",
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "SendMessage",
+    "value": {
+      "content": "hello",
+      "messageId": "00000000-0000-4000-8000-000000000001",
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "SendMessage",
+    "value": {
+      "attachments": [
+        "10000000-0000-4000-8000-000000000001"
+      ],
+      "content": "",
+      "messageId": "00000000-0000-4000-8000-000000000002",
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "AttachmentInfo",
+    "value": {
+      "contentType": "image/png",
+      "id": "10000000-0000-4000-8000-000000000001",
+      "name": "Screenshot.png",
+      "size": 380928
+    }
+  },
+  {
+    "type": "RetryMessage",
+    "value": {
+      "messageId": "00000000-0000-4000-8000-000000000001",
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "SetModel",
+    "value": {
+      "effort": "high",
+      "model": "opus",
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "AddProject",
+    "value": {
+      "name": "project",
+      "path": "/host/project",
+      "projectId": "20000000-0000-4000-8000-000000000001"
+    }
+  },
+  {
+    "type": "AddProject",
+    "value": {
+      "name": null,
+      "path": "/host/other",
+      "projectId": "20000000-0000-4000-8000-000000000002"
+    }
+  },
+  {
+    "type": "RemoveProject",
+    "value": {
+      "projectId": "20000000-0000-4000-8000-000000000001"
+    }
+  },
+  {
+    "type": "ReorderProjects",
+    "value": {
+      "projectIds": [
+        "20000000-0000-4000-8000-000000000002",
+        "20000000-0000-4000-8000-000000000001"
+      ]
+    }
+  },
+  {
+    "type": "ReorderChats",
+    "value": {
+      "projectId": "20000000-0000-4000-8000-000000000001",
+      "sessionIds": [
+        "b",
+        "a"
+      ]
+    }
+  },
+  {
+    "type": "SubmitSecret",
+    "value": {
+      "cancel": null,
+      "requestId": "20000000-0000-4000-8000-000000000001",
+      "value": "example-only"
+    }
+  },
+  {
+    "type": "SubmitSecret",
+    "value": {
+      "cancel": true,
+      "requestId": "20000000-0000-4000-8000-000000000001",
+      "value": null
+    }
+  },
+  {
+    "type": "SecretReply",
+    "value": {
+      "message": "Saved.",
+      "status": "saved"
+    }
+  },
+  {
+    "type": "ProjectInfo",
+    "value": {
+      "createdAt": 1,
+      "name": "project",
+      "path": "/host/project",
+      "projectId": "20000000-0000-4000-8000-000000000001"
+    }
+  },
+  {
+    "type": "ErrorInfo",
+    "value": {
+      "code": "invalid_request",
+      "message": "invalid UUID"
+    }
+  },
+  {
+    "type": "ListSessionsResponse",
+    "value": {
+      "cursor": 123,
+      "models": [
+        {
+          "agent": "claude",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "label": "opus",
+          "model": "opus"
+        },
+        {
+          "agent": "claude",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "label": "sonnet",
+          "model": "sonnet"
+        },
+        {
+          "agent": "claude",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "label": "haiku",
+          "model": "haiku"
+        },
+        {
+          "agent": "codex",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "label": "sol",
+          "model": "gpt-6.1-sol"
+        },
+        {
+          "agent": "codex",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "label": "terra",
+          "model": "gpt-6.1-terra"
+        },
+        {
+          "agent": "codex",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "label": "luna",
+          "model": "gpt-6-luna"
+        },
+        {
+          "agent": "pi",
+          "efforts": [
+            "medium",
+            "high"
+          ],
+          "label": "dsf",
+          "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+        }
+      ],
+      "projects": [
+        {
+          "createdAt": 1,
+          "name": "project",
+          "path": "/host/project",
+          "projectId": "20000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "sessions": [
+        {
+          "agent": "claude",
+          "agentSessionId": "claude-id",
+          "createdAt": 1,
+          "name": "Fixture session",
+          "projectId": "20000000-0000-4000-8000-000000000001",
+          "sessionId": "s",
+          "status": {
+            "accountUsage": {
+              "accountId": "account-1",
+              "credits": {
+                "balance": 40000.0,
+                "observedAt": 1
+              },
+              "fiveHour": {
+                "observedAt": 1,
+                "resetsAt": 2000000000,
+                "usedPercent": 80.0
+              },
+              "provider": "claude",
+              "weekly": null
+            },
+            "archived": false,
+            "dispatching": 0,
+            "effort": "high",
+            "heldReason": "Claude could not be started, so the queued messages are held.",
+            "model": "sonnet",
+            "queueHeld": true,
+            "queued": 2,
+            "rejected": 0,
+            "running": false,
+            "selectionPending": true,
+            "stopping": false,
+            "turnActive": false,
+            "uncertain": 1
+          },
+          "subagents": {
+            "failures": 0,
+            "open": 2,
+            "questions": 1,
+            "reportFailures": 1
+          },
+          "workingDirectory": "/host/project"
+        }
+      ]
+    }
+  },
+  {
+    "type": "SessionInfo",
+    "value": {
+      "agent": "claude",
+      "agentSessionId": "claude-id",
+      "createdAt": 1,
+      "name": "Fixture session",
+      "projectId": "20000000-0000-4000-8000-000000000001",
+      "sessionId": "s",
+      "status": {
+        "accountUsage": {
+          "accountId": "account-1",
+          "credits": {
+            "balance": 40000.0,
+            "observedAt": 1
+          },
+          "fiveHour": {
+            "observedAt": 1,
+            "resetsAt": 2000000000,
+            "usedPercent": 80.0
+          },
+          "provider": "claude",
+          "weekly": null
+        },
+        "archived": false,
+        "dispatching": 0,
+        "effort": "high",
+        "heldReason": "Claude could not be started, so the queued messages are held.",
+        "model": "sonnet",
+        "queueHeld": true,
+        "queued": 2,
+        "rejected": 0,
+        "running": false,
+        "selectionPending": true,
+        "stopping": false,
+        "turnActive": false,
+        "uncertain": 1
+      },
+      "subagents": {
+        "failures": 0,
+        "open": 2,
+        "questions": 1,
+        "reportFailures": 1
+      },
+      "workingDirectory": "/host/project"
+    }
+  },
+  {
+    "type": "CommandResponse",
+    "value": {
+      "status": {
+        "accountUsage": {
+          "accountId": "account-1",
+          "credits": {
+            "balance": 40000.0,
+            "observedAt": 1
+          },
+          "fiveHour": {
+            "observedAt": 1,
+            "resetsAt": 2000000000,
+            "usedPercent": 80.0
+          },
+          "provider": "claude",
+          "weekly": null
+        },
+        "archived": false,
+        "dispatching": 0,
+        "effort": "high",
+        "heldReason": "Claude could not be started, so the queued messages are held.",
+        "model": "sonnet",
+        "queueHeld": true,
+        "queued": 2,
+        "rejected": 0,
+        "running": false,
+        "selectionPending": true,
+        "stopping": false,
+        "turnActive": false,
+        "uncertain": 1
+      }
+    }
+  },
+  {
+    "type": "SendMessageResponse",
+    "value": {
+      "accepted": false,
+      "messageId": "00000000-0000-4000-8000-000000000001",
+      "status": {
+        "accountUsage": {
+          "accountId": "account-1",
+          "credits": {
+            "balance": 40000.0,
+            "observedAt": 1
+          },
+          "fiveHour": {
+            "observedAt": 1,
+            "resetsAt": 2000000000,
+            "usedPercent": 80.0
+          },
+          "provider": "claude",
+          "weekly": null
+        },
+        "archived": false,
+        "dispatching": 0,
+        "effort": "high",
+        "heldReason": "Claude could not be started, so the queued messages are held.",
+        "model": "sonnet",
+        "queueHeld": true,
+        "queued": 2,
+        "rejected": 0,
+        "running": false,
+        "selectionPending": true,
+        "stopping": false,
+        "turnActive": false,
+        "uncertain": 1
+      }
+    }
+  },
+  {
+    "type": "ChatHistory",
+    "value": {
+      "after": null,
+      "before": null,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "ChatHistoryPage",
+    "value": {
+      "context": [],
+      "cursor": 0,
+      "events": [],
+      "hasMore": false,
+      "partialId": null,
+      "sessionId": "s",
+      "status": {
+        "accountUsage": {
+          "accountId": "account-1",
+          "credits": {
+            "balance": 40000.0,
+            "observedAt": 1
+          },
+          "fiveHour": {
+            "observedAt": 1,
+            "resetsAt": 2000000000,
+            "usedPercent": 80.0
+          },
+          "provider": "claude",
+          "weekly": null
+        },
+        "archived": false,
+        "dispatching": 0,
+        "effort": "high",
+        "heldReason": "Claude could not be started, so the queued messages are held.",
+        "model": "sonnet",
+        "queueHeld": true,
+        "queued": 2,
+        "rejected": 0,
+        "running": false,
+        "selectionPending": true,
+        "stopping": false,
+        "turnActive": false,
+        "uncertain": 1
+      }
+    }
+  },
+  {
+    "type": "EventPage",
+    "value": {
+      "cursor": 1,
+      "events": [
+        {
+          "createdAt": 1,
+          "kind": "delivery_changed",
+          "payload": {
+            "delivery_state": "uncertain",
+            "retry_count": null,
+            "uuid": "m"
+          },
+          "seq": 1,
+          "sessionId": "s"
+        }
+      ],
+      "hasMore": false,
+      "sessionId": "s",
+      "status": {
+        "accountUsage": {
+          "accountId": "account-1",
+          "credits": {
+            "balance": 40000.0,
+            "observedAt": 1
+          },
+          "fiveHour": {
+            "observedAt": 1,
+            "resetsAt": 2000000000,
+            "usedPercent": 80.0
+          },
+          "provider": "claude",
+          "weekly": null
+        },
+        "archived": false,
+        "dispatching": 0,
+        "effort": "high",
+        "heldReason": "Claude could not be started, so the queued messages are held.",
+        "model": "sonnet",
+        "queueHeld": true,
+        "queued": 2,
+        "rejected": 0,
+        "running": false,
+        "selectionPending": true,
+        "stopping": false,
+        "turnActive": false,
+        "uncertain": 1
+      }
+    }
+  },
+  {
+    "type": "SessionListEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "created",
+      "payload": {
+        "id": "s",
+        "working_directory": "/host/project"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "SessionListEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "renamed",
+      "payload": {
+        "name": "Work"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "SessionListEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "archived",
+      "payload": {
+        "archived": true
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "SessionListEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "state_summary",
+      "payload": {
+        "accountUsage": {
+          "accountId": "account-1",
+          "credits": {
+            "balance": 40000.0,
+            "observedAt": 1
+          },
+          "fiveHour": {
+            "observedAt": 1,
+            "resetsAt": 2000000000,
+            "usedPercent": 80.0
+          },
+          "provider": "claude",
+          "weekly": null
+        },
+        "archived": false,
+        "dispatching": 0,
+        "effort": "high",
+        "heldReason": "Claude could not be started, so the queued messages are held.",
+        "model": "sonnet",
+        "queueHeld": true,
+        "queued": 2,
+        "rejected": 0,
+        "running": false,
+        "selectionPending": true,
+        "stopping": false,
+        "turnActive": false,
+        "uncertain": 1
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "SessionListEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "subagents_changed",
+      "payload": {},
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "state_summary",
+      "payload": {
+        "accountUsage": {
+          "accountId": "account-1",
+          "credits": {
+            "balance": 40000.0,
+            "observedAt": 1
+          },
+          "fiveHour": {
+            "observedAt": 1,
+            "resetsAt": 2000000000,
+            "usedPercent": 80.0
+          },
+          "provider": "claude",
+          "weekly": null
+        },
+        "archived": false,
+        "dispatching": 0,
+        "effort": "high",
+        "heldReason": "Claude could not be started, so the queued messages are held.",
+        "model": "sonnet",
+        "queueHeld": true,
+        "queued": 2,
+        "rejected": 0,
+        "running": false,
+        "selectionPending": true,
+        "stopping": false,
+        "turnActive": false,
+        "uncertain": 1
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "DeliveryState",
+    "value": "queued"
+  },
+  {
+    "type": "DeliveryState",
+    "value": "dispatching"
+  },
+  {
+    "type": "DeliveryState",
+    "value": "started"
+  },
+  {
+    "type": "DeliveryState",
+    "value": "rejected"
+  },
+  {
+    "type": "DeliveryState",
+    "value": "uncertain"
+  },
+  {
+    "type": "DeliveryState",
+    "value": "expired"
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "session_renamed",
+      "payload": {
+        "name": "Fixture session"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "session_created",
+      "payload": {
+        "id": "s",
+        "working_directory": "/host/project"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "message_appended",
+      "payload": {
+        "content": "hello",
+        "delivery_state": "queued",
+        "role": "user",
+        "uuid": "m"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "message_appended",
+      "payload": {
+        "attachments": [
+          {
+            "contentType": "image/png",
+            "id": "10000000-0000-4000-8000-000000000001",
+            "name": "Screenshot.png",
+            "size": 380928
+          }
+        ],
+        "content": "look",
+        "delivery_state": "queued",
+        "role": "user",
+        "uuid": "m2"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "delivery_changed",
+      "payload": {
+        "delivery_state": "started",
+        "retry_count": 1,
+        "uuid": "m"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "delivery_changed",
+      "payload": {
+        "delivery_state": "expired",
+        "expired_from": "uncertain",
+        "retry_count": null,
+        "uuid": "m"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "agent_session_changed",
+      "payload": {
+        "agent_session_id": "claude-id",
+        "previous": null
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "agent_session_changed",
+      "payload": {
+        "agent_session_id": "claude-id-2",
+        "previous": "claude-id"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "archive_changed",
+      "payload": {
+        "archived": true
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "model_effort_changed",
+      "payload": {
+        "effort": "high",
+        "model": "opus"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "delivery_rejected",
+      "payload": {
+        "retry_available": true,
+        "uuid": "m"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "agent_event",
+      "payload": {
+        "extra": 42,
+        "type": "future_agent_event"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "secret_requested",
+      "payload": {
+        "expires_at": 1,
+        "file": "/home/me/secrets.yaml",
+        "key": [
+          "db",
+          "password"
+        ],
+        "request_id": "20000000-0000-4000-8000-000000000001"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "secret_resolved",
+      "payload": {
+        "request_id": "20000000-0000-4000-8000-000000000001",
+        "status": "saved"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "driver_error",
+      "payload": {
+        "message": "process exited"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "model_error",
+      "payload": {
+        "message": "control refused"
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "session_stopping",
+      "payload": {},
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "session_stopped",
+      "payload": {},
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "delivery_timeout",
+      "payload": {},
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "StoredEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "stop_timeout",
+      "payload": {},
+      "seq": 1,
+      "sessionId": "s"
+    }
+  }
+]

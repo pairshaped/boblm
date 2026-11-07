@@ -1,0 +1,695 @@
+[
+  {
+    "viewport": 1440,
+    "id": "profile-1000",
+    "run": 0,
+    "open": {
+      "readableMs": 292.39999997615814,
+      "historyHttpMs": 7.899999976158142,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": [
+        77,
+        77
+      ]
+    },
+    "pagingMs": [
+      57,
+      40,
+      93,
+      95,
+      81
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.299999952316284
+    },
+    "scrollTaskMs": 262.062,
+    "scrollLayoutMs": 0,
+    "heapBytes": 22334752
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-1000",
+    "run": 1,
+    "open": {
+      "readableMs": 156,
+      "historyHttpMs": 7.800000071525574,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      52,
+      71,
+      79,
+      80,
+      78
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.09999990463257
+    },
+    "scrollTaskMs": 174.55399999999997,
+    "scrollLayoutMs": 0,
+    "heapBytes": 20384484
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-1000",
+    "run": 2,
+    "open": {
+      "readableMs": 165.39999997615814,
+      "historyHttpMs": 7.199999928474426,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      59,
+      39,
+      42,
+      90,
+      87
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.199999928474426
+    },
+    "scrollTaskMs": 149.887,
+    "scrollLayoutMs": 0,
+    "heapBytes": 22848256
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-10000",
+    "run": 0,
+    "open": {
+      "readableMs": 189.39999997615814,
+      "historyHttpMs": 12,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      76,
+      69,
+      94,
+      106,
+      95
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 248.95999999999995,
+    "scrollLayoutMs": 0,
+    "heapBytes": 26465164
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-10000",
+    "run": 1,
+    "open": {
+      "readableMs": 164.90000009536743,
+      "historyHttpMs": 10.600000023841858,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      57,
+      41,
+      87,
+      82,
+      82
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 147.66000000000003,
+    "scrollLayoutMs": 0,
+    "heapBytes": 32813364
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-10000",
+    "run": 2,
+    "open": {
+      "readableMs": 163.60000002384186,
+      "historyHttpMs": 9.699999928474426,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      62,
+      39,
+      87,
+      78,
+      93
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 188.04200000000003,
+    "scrollLayoutMs": 0,
+    "heapBytes": 23097900
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-50000",
+    "run": 0,
+    "open": {
+      "readableMs": 160,
+      "historyHttpMs": 17.899999976158142,
+      "historyBytes": 1264,
+      "rows": 42,
+      "domNodes": 1179,
+      "longTasks": []
+    },
+    "pagingMs": [
+      64,
+      69,
+      88,
+      83,
+      83
+    ],
+    "scrolling": {
+      "rows": 167,
+      "domNodes": 4416,
+      "frameGapP95Ms": 17.199999928474426
+    },
+    "scrollTaskMs": 156.20299999999997,
+    "scrollLayoutMs": 0,
+    "heapBytes": 31312416
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-50000",
+    "run": 1,
+    "open": {
+      "readableMs": 166.60000002384186,
+      "historyHttpMs": 18.600000023841858,
+      "historyBytes": 1264,
+      "rows": 42,
+      "domNodes": 1179,
+      "longTasks": []
+    },
+    "pagingMs": [
+      73,
+      87,
+      88,
+      89,
+      94
+    ],
+    "scrolling": {
+      "rows": 167,
+      "domNodes": 4416,
+      "frameGapP95Ms": 17.199999928474426
+    },
+    "scrollTaskMs": 196.97500000000002,
+    "scrollLayoutMs": 0,
+    "heapBytes": 22530320
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-50000",
+    "run": 2,
+    "open": {
+      "readableMs": 166.70000004768372,
+      "historyHttpMs": 18.600000023841858,
+      "historyBytes": 1264,
+      "rows": 42,
+      "domNodes": 1179,
+      "longTasks": []
+    },
+    "pagingMs": [
+      58,
+      70,
+      87,
+      81,
+      82
+    ],
+    "scrolling": {
+      "rows": 167,
+      "domNodes": 4416,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 155.92700000000005,
+    "scrollLayoutMs": 0,
+    "heapBytes": 29885756
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-dense",
+    "run": 0,
+    "open": {
+      "readableMs": 449.1999999284744,
+      "historyHttpMs": 26.299999952316284,
+      "historyBytes": 5356,
+      "rows": 42,
+      "domNodes": 15252,
+      "longTasks": [
+        312,
+        312
+      ]
+    },
+    "pagingMs": [
+      403,
+      419,
+      497,
+      516,
+      550
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 56982,
+      "frameGapP95Ms": 17.199999928474426
+    },
+    "scrollTaskMs": 187.7080000000002,
+    "scrollLayoutMs": 0,
+    "heapBytes": 28046048
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-dense",
+    "run": 1,
+    "open": {
+      "readableMs": 569.1000000238419,
+      "historyHttpMs": 25.600000023841858,
+      "historyBytes": 5356,
+      "rows": 42,
+      "domNodes": 15252,
+      "longTasks": [
+        349,
+        349
+      ]
+    },
+    "pagingMs": [
+      366,
+      442,
+      521,
+      566,
+      501
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 56982,
+      "frameGapP95Ms": 17.100000023841858
+    },
+    "scrollTaskMs": 188.45400000000012,
+    "scrollLayoutMs": 0,
+    "heapBytes": 34825812
+  },
+  {
+    "viewport": 1440,
+    "id": "profile-dense",
+    "run": 2,
+    "open": {
+      "readableMs": 494.10000002384186,
+      "historyHttpMs": 24.300000071525574,
+      "historyBytes": 5356,
+      "rows": 42,
+      "domNodes": 15252,
+      "longTasks": [
+        292,
+        292
+      ]
+    },
+    "pagingMs": [
+      354,
+      450,
+      531,
+      534,
+      513
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 56982,
+      "frameGapP95Ms": 17.199999928474426
+    },
+    "scrollTaskMs": 164.3270000000001,
+    "scrollLayoutMs": 0,
+    "heapBytes": 42685012
+  },
+  {
+    "viewport": 390,
+    "id": "profile-1000",
+    "run": 0,
+    "open": {
+      "readableMs": 240.20000004768372,
+      "historyHttpMs": 8.5,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      56,
+      39,
+      41,
+      80,
+      107
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.100000023841858
+    },
+    "scrollTaskMs": 273.169,
+    "scrollLayoutMs": 0,
+    "heapBytes": 30671844
+  },
+  {
+    "viewport": 390,
+    "id": "profile-1000",
+    "run": 1,
+    "open": {
+      "readableMs": 160.30000007152557,
+      "historyHttpMs": 7.5,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      39,
+      39,
+      86,
+      39,
+      79
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 130.27800000000005,
+    "scrollLayoutMs": 0,
+    "heapBytes": 49596384
+  },
+  {
+    "viewport": 390,
+    "id": "profile-1000",
+    "run": 2,
+    "open": {
+      "readableMs": 160.5,
+      "historyHttpMs": 7.900000095367432,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      36,
+      49,
+      99,
+      76,
+      77
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.199999928474426
+    },
+    "scrollTaskMs": 113.65700000000001,
+    "scrollLayoutMs": 0,
+    "heapBytes": 41886132
+  },
+  {
+    "viewport": 390,
+    "id": "profile-10000",
+    "run": 0,
+    "open": {
+      "readableMs": 166.20000004768372,
+      "historyHttpMs": 9.899999976158142,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      53,
+      54,
+      88,
+      84,
+      88
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 197.666,
+    "scrollLayoutMs": 0,
+    "heapBytes": 25935912
+  },
+  {
+    "viewport": 390,
+    "id": "profile-10000",
+    "run": 1,
+    "open": {
+      "readableMs": 153.60000002384186,
+      "historyHttpMs": 10,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      48,
+      51,
+      44,
+      78,
+      42
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.09999990463257
+    },
+    "scrollTaskMs": 148.68000000000004,
+    "scrollLayoutMs": 0,
+    "heapBytes": 44951784
+  },
+  {
+    "viewport": 390,
+    "id": "profile-10000",
+    "run": 2,
+    "open": {
+      "readableMs": 159.29999995231628,
+      "historyHttpMs": 9.300000071525574,
+      "historyBytes": 1263,
+      "rows": 42,
+      "domNodes": 1216,
+      "longTasks": []
+    },
+    "pagingMs": [
+      45,
+      69,
+      96,
+      90,
+      77
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 4347,
+      "frameGapP95Ms": 17.199999928474426
+    },
+    "scrollTaskMs": 156.86899999999991,
+    "scrollLayoutMs": 0,
+    "heapBytes": 37231628
+  },
+  {
+    "viewport": 390,
+    "id": "profile-50000",
+    "run": 0,
+    "open": {
+      "readableMs": 148.89999997615814,
+      "historyHttpMs": 18.199999928474426,
+      "historyBytes": 1264,
+      "rows": 42,
+      "domNodes": 1179,
+      "longTasks": []
+    },
+    "pagingMs": [
+      55,
+      69,
+      85,
+      83,
+      84
+    ],
+    "scrolling": {
+      "rows": 167,
+      "domNodes": 4416,
+      "frameGapP95Ms": 17.299999952316284
+    },
+    "scrollTaskMs": 198.082,
+    "scrollLayoutMs": 0,
+    "heapBytes": 25774368
+  },
+  {
+    "viewport": 390,
+    "id": "profile-50000",
+    "run": 1,
+    "open": {
+      "readableMs": 153.80000007152557,
+      "historyHttpMs": 18.800000071525574,
+      "historyBytes": 1264,
+      "rows": 42,
+      "domNodes": 1179,
+      "longTasks": []
+    },
+    "pagingMs": [
+      67,
+      70,
+      87,
+      82,
+      82
+    ],
+    "scrolling": {
+      "rows": 167,
+      "domNodes": 4416,
+      "frameGapP95Ms": 17.199999928474426
+    },
+    "scrollTaskMs": 184.09299999999996,
+    "scrollLayoutMs": 0,
+    "heapBytes": 46589132
+  },
+  {
+    "viewport": 390,
+    "id": "profile-50000",
+    "run": 2,
+    "open": {
+      "readableMs": 157.80000007152557,
+      "historyHttpMs": 18.899999976158142,
+      "historyBytes": 1264,
+      "rows": 42,
+      "domNodes": 1179,
+      "longTasks": []
+    },
+    "pagingMs": [
+      63,
+      71,
+      87,
+      83,
+      82
+    ],
+    "scrolling": {
+      "rows": 167,
+      "domNodes": 4416,
+      "frameGapP95Ms": 17.100000023841858
+    },
+    "scrollTaskMs": 138.359,
+    "scrollLayoutMs": 0,
+    "heapBytes": 37715496
+  },
+  {
+    "viewport": 390,
+    "id": "profile-dense",
+    "run": 0,
+    "open": {
+      "readableMs": 427.7999999523163,
+      "historyHttpMs": 24.399999976158142,
+      "historyBytes": 5356,
+      "rows": 42,
+      "domNodes": 15252,
+      "longTasks": [
+        298,
+        298
+      ]
+    },
+    "pagingMs": [
+      351,
+      397,
+      541,
+      564,
+      542
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 56982,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 277.50699999999995,
+    "scrollLayoutMs": 0,
+    "heapBytes": 42758552
+  },
+  {
+    "viewport": 390,
+    "id": "profile-dense",
+    "run": 1,
+    "open": {
+      "readableMs": 505.60000002384186,
+      "historyHttpMs": 24.300000071525574,
+      "historyBytes": 5356,
+      "rows": 42,
+      "domNodes": 15252,
+      "longTasks": [
+        294,
+        294
+      ]
+    },
+    "pagingMs": [
+      339,
+      428,
+      484,
+      537,
+      516
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 56982,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 296.87600000000015,
+    "scrollLayoutMs": 0,
+    "heapBytes": 48840232
+  },
+  {
+    "viewport": 390,
+    "id": "profile-dense",
+    "run": 2,
+    "open": {
+      "readableMs": 515,
+      "historyHttpMs": 26.90000009536743,
+      "historyBytes": 5356,
+      "rows": 42,
+      "domNodes": 15252,
+      "longTasks": [
+        309,
+        309
+      ]
+    },
+    "pagingMs": [
+      377,
+      423,
+      486,
+      543,
+      603
+    ],
+    "scrolling": {
+      "rows": 166,
+      "domNodes": 56982,
+      "frameGapP95Ms": 17.200000047683716
+    },
+    "scrollTaskMs": 350.9160000000002,
+    "scrollLayoutMs": 0,
+    "heapBytes": 34998636
+  }
+]

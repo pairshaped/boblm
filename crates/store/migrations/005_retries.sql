@@ -1,0 +1,1 @@
+ALTER TABLE messages ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count BETWEEN 0 AND 2);

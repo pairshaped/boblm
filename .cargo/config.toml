@@ -1,0 +1,3 @@
+# Shared dependency cache across worktrees and agents. The dev box has sccache.
+[build]
+rustc-wrapper = "sccache"

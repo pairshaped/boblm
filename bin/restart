@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Restart the boblm user service only when chats have no pending work (ADR 0014).
+# Legacy servers stop agent children; persistent-runner servers detach from them.
+#   bin/restart                restart now, or refuse and list the busy chats
+#   bin/restart --wait SECS    poll until idle, refuse after SECS
+#   bin/restart --force        restart even if chats are busy
+#   bin/restart --detach SECS  run the same command later in the background, so
+#                              the chat that asked can finish its reply first
+set -euo pipefail
+
+db=${BOBLM_DB:-$HOME/.local/share/boblm/boblm.sqlite}
+# The running server writes this database. SQLite's own busy wait lets a read queue behind
+# a commit instead of failing with "database is locked".
+sqlite_wait_ms=5000
+unit=${BOBLM_UNIT:-boblm}
+settle=${BOBLM_SETTLE:-3}
+wait_secs=0
+force=0
+detach=
+
+usage() {
+  echo "Usage: bin/restart [--wait SECONDS] [--force] [--detach SECONDS]" >&2
+  exit 2
+}
+
+number() {
+  [[ ${2:-} =~ ^[0-9]+$ ]] || { echo "$1 needs a whole number of seconds." >&2; usage; }
+}
+
+args=("$@")
+while (($#)); do
+  case $1 in
+    --wait) number "$1" "${2:-}"; wait_secs=$2; shift 2 ;;
+    --detach) number "$1" "${2:-}"; detach=$2; shift 2 ;;
+    --force) force=1; shift ;;
+    *) usage ;;
+  esac
+done
+
+if [[ -n $detach ]]; then
+  rest=()
+  skip=0
+  for a in "${args[@]}"; do
+    if ((skip)); then skip=0; continue; fi
+    if [[ $a == --detach ]]; then skip=1; continue; fi
+    rest+=("$a")
+  done
+  script=$(readlink -f "$0")
+  systemd-run --user --quiet --unit="boblm-restart-$(date +%s)" \
+    bash -c 'sleep "$1"; shift; exec "$@"' _ "$detach" "$script" "${rest[@]}"
+  echo "Restart scheduled in $detach seconds."
+  exit 0
+fi
+
+# A chat is busy when its latest state_summary shows a turn, dispatch or stop in
+# flight, or when it has accepted messages that have not started and its queue is not
+# held (a held queue waits for the owner, so it never starts on its own).
+busy_chats() {
+  [[ -r $db ]] || { echo "Cannot read the boblm database at $db, so chat activity is unknown. Set BOBLM_DB or use --force." >&2; return 2; }
+  sqlite3 -readonly -cmd ".timeout $sqlite_wait_ms" "$db" "
+    with latest as (
+      select e.session, e.payload from events e
+      where e.kind = 'state_summary'
+        and e.seq = (select max(seq) from events where session = e.session and kind = 'state_summary'))
+    select coalesce(nullif(s.name, ''), s.id)
+    from latest l join sessions s on s.id = l.session
+    where s.archived = 0
+      and (json_extract(l.payload, '\$.turnActive')
+        or json_extract(l.payload, '\$.dispatching') > 0
+        or json_extract(l.payload, '\$.stopping')
+        or json_array_length(json_extract(l.payload, '\$.jobs.tasks')) > 0
+        or json_extract(l.payload, '\$.jobs.available') = 0
+        or (not coalesce(json_extract(l.payload, '\$.queueHeld'), 0)
+            and exists (select 1 from messages m
+                        where m.session = s.id and m.delivery_state in ('queued', 'dispatching'))))
+    order by 1"
+}
+
+# Only bypass the legacy idle guard when the running service itself confirms
+# independent runner ownership. Match its PID so another local instance cannot
+# authorize stopping a legacy server. Failure falls back to the existing guard.
+persistent_server() {
+  python3 - "$db" "$unit" "${BOBLM_CONFIG:-$HOME/.config/boblm/boblm.json}" <<'PYTHON'
+import json, pathlib, subprocess, sys, urllib.request
+try:
+    database, unit, path = sys.argv[1:]
+    settings = json.loads(pathlib.Path(path).read_text())
+    if pathlib.Path(database).resolve() != pathlib.Path(settings['database']).resolve():
+        raise ValueError('different instance')
+    request = urllib.request.Request('http://127.0.0.1:' + str(settings['port']) + '/commands/runtimeCapabilities',
+        b'{}', headers={'Authorization':'Bearer ' + settings['token'], 'Content-Type':'application/json'})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        claim = json.load(response)
+    pid = int(subprocess.check_output(['systemctl','--user','show',unit,'--property=MainPID','--value'], text=True).strip())
+    sys.exit(0 if pid > 0 and claim.get('processId') == pid and claim.get('persistentRunners') is True else 1)
+except Exception:
+    sys.exit(1)
+PYTHON
+}
+
+if ((!force)) && persistent_server; then
+  echo "Session runners are independent; restarting only the web server."
+  systemctl --user restart "$unit"
+  echo "Restarted $unit."
+  exit 0
+fi
+
+if ((!force)); then
+  deadline=$((SECONDS + wait_secs))
+  while :; do
+    busy=$(busy_chats) || exit 1
+    if [[ -z $busy ]]; then
+      # Accepted work can lag the state summary, so look again after a pause.
+      sleep "$settle"
+      busy=$(busy_chats) || exit 1
+      [[ -z $busy ]] && break
+    fi
+    if ((SECONDS >= deadline)); then
+      summary=$(sqlite3 -readonly -cmd ".timeout $sqlite_wait_ms" "$db" "
+        with latest as (
+          select e.payload from events e where e.kind = 'state_summary'
+          and e.seq = (select max(seq) from events where session=e.session and kind='state_summary'))
+        select coalesce(sum(json_array_length(json_extract(payload, '\$.jobs.tasks'))),0)
+          || ' background tasks in ' || count(*) || ' chats'
+        from latest where json_array_length(json_extract(payload, '\$.jobs.tasks')) > 0")
+      echo "Not restarting: $summary. A restart would stop this work." >&2
+      echo "Not restarting: these chats are mid-turn, have pending messages or background work, or their job status is unknown, and a restart would kill them:" >&2
+      sed 's/^/  /' <<<"$busy" >&2
+      echo "Wait for them to finish, use --wait SECONDS, or use --force to restart anyway." >&2
+      exit 1
+    fi
+    sleep 2
+  done
+fi
+
+systemctl --user restart "$unit"
+echo "Restarted $unit."

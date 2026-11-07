@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Behavior test for bin/dev-instance with a fake server binary and no builds.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+work=$(mktemp -d "$here/../target/dev-instance-test.XXXXXX")
+cleanup() {
+  for pidfile in "$work"/home/*/server.pid; do
+    [[ -f $pidfile ]] && kill "$(<"$pidfile")" 2>/dev/null || true
+  done
+  rm -rf "$work"
+}
+trap cleanup EXIT
+fail() { echo "FAIL: $*"; exit 1; }
+
+# Stands in for `boblm serve --config PATH`: listens first, then reports the port.
+cat > "$work/fake-boblm" <<'SH'
+#!/usr/bin/env bash
+[[ $1 == stop-runners ]] && exit 0
+port=$(sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$3")
+nc -l 127.0.0.1 "$port" >/dev/null 2>&1 &
+child=$!
+trap 'kill "$child" 2>/dev/null; exit 0' TERM
+sleep 0.2
+echo "boblm listening on http://127.0.0.1:$port"
+wait "$child"
+SH
+chmod +x "$work/fake-boblm"
+
+export BOBLM_DEV_HOME="$work/home" BOBLM_DEV_BIN="$work/fake-boblm" BOBLM_DEV_NO_BUILD=1
+export BOBLM_LIVE_DB="$work/live.sqlite"
+sqlite3 "$BOBLM_LIVE_DB" "create table t (x); insert into t values ('live chat');"
+dev() { "$here/dev-instance" "$@"; }
+port=$((39000 + RANDOM % 900))
+
+# A stale listening line from an earlier run must not satisfy readiness.
+install -d -m 700 "$work/home/a"
+echo "boblm listening on http://127.0.0.1:1" > "$work/home/a/server.log"
+
+# First start writes a private config with its own database, port and token.
+dev start --name a --port "$port" >/dev/null || fail "start should succeed"
+grep -q "boblm listening on http://127.0.0.1:$port" "$work/home/a/server.log" || fail "start must wait for the new process's listening line"
+grep -q "127.0.0.1:1" "$work/home/a/server.log" && fail "start must replace the stale log"
+ss -ltn "sport = :$port" | grep -q LISTEN || fail "start must not return before the new port listens"
+cfg=$work/home/a/boblm.json
+[[ $(stat -c %a "$cfg") == 600 ]] || fail "config must be mode 600"
+grep -q "\"port\": $port" "$cfg" || fail "config should hold the chosen port"
+token=$(dev token --name a)
+((${#token} >= 32)) || fail "token should be long: ${#token}"
+grep -q "$work/home/a/data/boblm.sqlite" "$cfg" || fail "database must live in the dev directory"
+grep -q "$BOBLM_LIVE_DB" "$cfg" && fail "the dev config must never name the live database"
+dev status --name a >/dev/null || fail "status should report running"
+
+# A running instance is not started twice, and a second instance cannot take its port.
+dev start --name a >/dev/null 2>&1 && fail "starting twice should refuse"
+dev start --name b --port "$port" >/dev/null 2>&1 && fail "a port in use should refuse"
+
+# Restart keeps the config and the token, and swaps the process.
+old=$(<"$work/home/a/server.pid")
+dev restart --name a >/dev/null || fail "restart should succeed"
+new=$(<"$work/home/a/server.pid")
+[[ $old != "$new" ]] || fail "restart should start a new process"
+kill -0 "$old" 2>/dev/null && fail "the old process should be gone"
+[[ $(dev token --name a) == "$token" ]] || fail "the token must survive a restart"
+
+# Stop ends it and leaves the config.
+dev stop --name a >/dev/null || fail "stop should succeed"
+dev status --name a >/dev/null 2>&1 && fail "status should report stopped"
+[[ -f $cfg && ! -e $work/home/a/server.pid ]] || fail "stop keeps the config and drops the pid file"
+
+# A recycled pid is never killed.
+echo $$ > "$work/home/a/server.pid"
+dev stop --name a >/dev/null || fail "a stale pid file should be tolerated"
+kill -0 $$ || fail "an unrelated process must not be killed"
+
+# --copy-db copies the live chats once, read-only on the source.
+dev start --name c --port $((port + 1)) --copy-db >/dev/null || fail "copy start should succeed"
+[[ $(sqlite3 "$work/home/c/data/boblm.sqlite" "select x from t") == "live chat" ]] || fail "chats should be copied"
+dev stop --name c >/dev/null
+
+# Names are restricted so a name cannot escape the dev directory.
+dev start --name '../x' >/dev/null 2>&1 && fail "a path-like name should refuse"
+
+echo "dev-instance tests passed"

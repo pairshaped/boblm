@@ -1,0 +1,46 @@
+[package]
+name = "boblm-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono-tz = "0.10"
+boblm-tuning = { path = "../tuning" }
+axum = "0.8"
+async-stream = "0.3"
+futures-core = "0.3"
+boblm-store = { path = "../store" }
+boblm-claude-driver = { path = "../claude-driver" }
+boblm-codex-driver = { path = "../codex-driver" }
+boblm-pi-driver = { path = "../pi-driver" }
+async-trait = "0.1"
+percent-encoding = "2"
+boblm-runner = { path = "../runner" }
+boblm-protocol = { path = "../protocol" }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+tokio = { workspace = true, features = ["net", "signal", "fs"] }
+tokio-util = { version = "0.7", features = ["io"] }
+http-body-util = "0.1"
+serde_json.workspace = true
+serde.workspace = true
+tower-http = { version = "0.6", features = ["fs", "compression-gzip"] }
+subtle = "2"
+rmcp = { version = "3.2", features = ["transport-streamable-http-server"] }
+hmac = "0.12"
+sha2 = "0.10"
+flate2 = "1"
+uuid.workspace = true
+getrandom = "0.4"
+base64 = "0.23"
+tempfile = "3"
+web-push-native = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
+[dev-dependencies]
+rusqlite = { version = "0.39", features = ["bundled"] }
+tower = { version = "0.5", features = ["util"] }
+tokio = { workspace = true, features = ["test-util"] }
+
+[[bin]]
+name = "boblm"
+path = "src/main.rs"

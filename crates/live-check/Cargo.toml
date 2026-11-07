@@ -1,0 +1,12 @@
+[package]
+name = "boblm-live-check"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+boblm-protocol = { path = "../protocol" }
+boblm-claude-driver = { path = "../claude-driver" }
+tokio.workspace = true
+
+serde_json.workspace = true
+uuid.workspace = true

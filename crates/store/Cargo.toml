@@ -1,0 +1,15 @@
+[package]
+name = "boblm-store"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+uuid.workspace = true
+boblm-protocol = { path = "../protocol" }
+boblm-tuning = { path = "../tuning" }
+marmot = { git = "https://github.com/pairshaped/marmot-rust", rev = "4c0934bed315c81de67e08c60f00a2ad74969c5b" }
+rusqlite = { version = "0.39", features = ["bundled"] }
+thiserror = "2"
+serde_json.workspace = true
+
+tempfile = "3"

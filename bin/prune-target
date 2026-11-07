@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Keep target/ from growing without bound.
+#
+#   bin/prune-target             prune (stale scratch always; build artifacts when over the limit)
+#   bin/prune-target --if-over   same, but print nothing when under the limit
+#   bin/prune-target --report    print sizes only
+#
+# Stages, stopping as soon as target/ is under the limit:
+#   0. always: stale test temp dirs and old loose files at the target root
+#   1. incremental caches (cheap to regenerate)
+#   2. dependency, fingerprint and example artifacts not modified in STALE_DAYS days
+#   3. the oldest remaining dependency and example artifacts, until under the limit
+# Cargo rebuilds whatever is missing, so deleting artifacts only costs build time.
+# It takes Cargo's build lock first, so it cannot delete files under a running build
+# in this directory.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+# Tunable: size limit in GB (BOBLM_TARGET_LIMIT_KB overrides it, for tests).
+LIMIT_GB="${BOBLM_TARGET_LIMIT_GB:-6}"
+STALE_DAYS="${BOBLM_TARGET_STALE_DAYS:-7}"
+TARGET="${BOBLM_TARGET_DIR:-target}"
+LIMIT_KB="${BOBLM_TARGET_LIMIT_KB:-$((LIMIT_GB * 1024 * 1024))}"
+mode="${1:-run}"
+
+[[ -d "$TARGET" ]] || exit 0
+# Only ever touch a Cargo target directory: it has a profile directory or Cargo's own tag.
+if [[ ! -f "$TARGET/CACHEDIR.TAG" && ! -d "$TARGET/debug" && ! -d "$TARGET/release" ]]; then
+  echo "prune-target: $TARGET does not look like a Cargo target directory (no debug/, release/ or CACHEDIR.TAG); refusing to delete anything from it" >&2
+  exit 1
+fi
+size_kb() { du -sk "$TARGET" 2>/dev/null | cut -f1; }
+human() { numfmt --to=iec --from-unit=1024 "$1"; }
+say() { [[ "$mode" == --if-over && "$before" -le "$LIMIT_KB" ]] || echo "$@"; }
+
+before=$(size_kb)
+if [[ "$mode" == --report ]]; then
+  echo "target: $(human "$before") (limit $(human "$LIMIT_KB"))"
+  du -sh "$TARGET"/* 2>/dev/null | sort -rh | head -5
+  exit 0
+fi
+
+# Hold Cargo's build lock for every profile, so no build in this directory can be running.
+descriptor=9
+for profile in debug release; do
+  if [[ -e "$TARGET/$profile/.cargo-lock" ]]; then
+    eval "exec $descriptor>\"$TARGET/$profile/.cargo-lock\""
+    if ! flock -n "$descriptor"; then
+      echo "prune-target: a build holds the lock in $TARGET/$profile; skipping"
+      exit 0
+    fi
+    descriptor=$((descriptor + 1))
+  fi
+done
+
+# Stage 0: scratch that only accumulates.
+find "$TARGET" -maxdepth 1 -type d -name '.tmp*' -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+find "$TARGET" -maxdepth 1 -type f ! -name CACHEDIR.TAG -mtime +"$STALE_DAYS" -delete 2>/dev/null || true
+
+current=$(size_kb)
+if (( current > LIMIT_KB )); then
+  for profile in debug release; do
+    rm -rf "$TARGET/$profile/incremental"
+  done
+  current=$(size_kb)
+  say "prune-target: removed incremental caches"
+fi
+if (( current > LIMIT_KB )); then
+  for directory in deps .fingerprint examples build; do
+    for profile in debug release; do
+      [[ -d "$TARGET/$profile/$directory" ]] &&
+        find "$TARGET/$profile/$directory" -mindepth 1 -mtime +"$STALE_DAYS" -delete 2>/dev/null || true
+    done
+  done
+  current=$(size_kb)
+  say "prune-target: removed build artifacts older than $STALE_DAYS days"
+fi
+if (( current > LIMIT_KB )); then
+  # Hard links make the running total approximate, so measure again and repeat until the
+  # limit is met or a pass finds nothing left to delete.
+  while (( current > LIMIT_KB )); do
+    removed=0
+    while IFS=' ' read -r _ kilobytes path; do
+      rm -f -- "$path"
+      removed=$((removed + 1))
+      current=$((current - kilobytes))
+      (( current > LIMIT_KB )) || break
+    done < <(find "$TARGET"/{debug,release}/{deps,examples,build} -type f -printf '%T@ %k %p\n' 2>/dev/null | sort -n)
+    current=$(size_kb)
+    (( removed > 0 )) || break
+  done
+  say "prune-target: removed the oldest artifacts until under the limit"
+fi
+if (( current > LIMIT_KB )); then
+  echo "prune-target: still $(human "$current"), over the $(human "$LIMIT_KB") limit; the rest is outside deps, examples and build"
+fi
+say "prune-target: $(human "$before") -> $(human "$current") (limit $(human "$LIMIT_KB"))"

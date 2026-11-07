@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Fail on the vague error wording ADR 0021 rules out. Add a phrase here when one slips in.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+banned='server operation failed|unknown error|something went wrong|an error occurred|operation failed\.'
+if grep -rniE "$banned" crates/*/src web/src --include=*.rs --include=*.ts \
+     --exclude-dir=generated --exclude='*.generated.rs' ; then
+  echo "check-messages: the lines above use vague error wording. Say what happened, why, and what to do (docs/adr/0021-error-messages.md)." >&2
+  exit 1
+fi
+echo 'error wording ok'

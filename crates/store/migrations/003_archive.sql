@@ -1,0 +1,2 @@
+ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0
+    CONSTRAINT boolean CHECK (archived IN (0, 1));

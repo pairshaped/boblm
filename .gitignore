@@ -1,0 +1,5 @@
+target/
+*.log
+web/node_modules/
+web/dist/
+.playwright-cli/

@@ -1,0 +1,178 @@
+{
+  "codex": "codex-cli 0.166.0",
+  "notifications": [
+    "item/agentMessage/delta",
+    "item/completed",
+    "item/started",
+    "thread/started",
+    "turn/completed",
+    "turn/started"
+  ],
+  "requests": {
+    "initialize": {
+      "properties": [
+        "capabilities",
+        "clientInfo"
+      ],
+      "required": [
+        "clientInfo"
+      ]
+    },
+    "thread/backgroundTerminals/list": {
+      "properties": [
+        "cursor",
+        "limit",
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
+    "thread/compact/start": {
+      "properties": [
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
+    "thread/loaded/list": {
+      "properties": [
+        "cursor",
+        "limit"
+      ],
+      "required": []
+    },
+    "thread/resume": {
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "developerInstructions",
+        "excludeTurns",
+        "history",
+        "initialTurnsPage",
+        "model",
+        "modelProvider",
+        "path",
+        "permissions",
+        "personality",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "serviceTier",
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
+    "thread/start": {
+      "properties": [
+        "allowProviderModelFallback",
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "daybreakEnabled",
+        "developerInstructions",
+        "dynamicTools",
+        "environments",
+        "ephemeral",
+        "experimentalRawEvents",
+        "historyMode",
+        "mockExperimentalField",
+        "model",
+        "modelProvider",
+        "multiAgentMode",
+        "permissions",
+        "personality",
+        "projectId",
+        "runtimeWorkspaceRoots",
+        "sandbox",
+        "selectedCapabilityRoots",
+        "serviceName",
+        "serviceTier",
+        "sessionStartSource",
+        "threadSource"
+      ],
+      "required": []
+    },
+    "thread/turns/list": {
+      "properties": [
+        "cursor",
+        "itemsView",
+        "limit",
+        "sortDirection",
+        "threadId"
+      ],
+      "required": [
+        "threadId"
+      ]
+    },
+    "turn/interrupt": {
+      "properties": [
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "threadId",
+        "turnId"
+      ]
+    },
+    "turn/start": {
+      "properties": [
+        "additionalContext",
+        "approvalPolicy",
+        "approvalsReviewer",
+        "clientUserMessageId",
+        "collaborationMode",
+        "cwd",
+        "cyberAccessProgram",
+        "disabledPluginIds",
+        "effort",
+        "environments",
+        "input",
+        "model",
+        "multiAgentMode",
+        "outputSchema",
+        "parentTurnId",
+        "permissions",
+        "personality",
+        "responsesapiClientMetadata",
+        "responsesapiClientMetadataPatch",
+        "rootTurnId",
+        "runtimeWorkspaceRoots",
+        "sandboxPolicy",
+        "serviceTier",
+        "serviceTierForTurn",
+        "summary",
+        "threadId",
+        "toolOutput",
+        "turnTrigger"
+      ],
+      "required": [
+        "input",
+        "threadId"
+      ]
+    },
+    "turn/steer": {
+      "properties": [
+        "additionalContext",
+        "clientUserMessageId",
+        "expectedTurnId",
+        "input",
+        "responsesapiClientMetadata",
+        "responsesapiClientMetadataPatch",
+        "threadId"
+      ],
+      "required": [
+        "expectedTurnId",
+        "input",
+        "threadId"
+      ]
+    }
+  }
+}

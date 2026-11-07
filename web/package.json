@@ -1,0 +1,23 @@
+{
+  "name": "boblm-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "build": "esbuild src/main.ts --bundle --format=esm --target=es2022 --outfile=dist/app.js && cp index.html favicon.svg sw.js manifest.webmanifest icon-192.png icon-512.png dist/ && cat src/theme.css src/style.css > dist/style.css"
+  },
+  "devDependencies": {
+    "@pairshaped/hypertea": "github:pairshaped/hypertea#c518760aeb41ca6c1c978336523b49a0008c1590",
+    "@types/jsdom": "^21",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25",
+    "jsdom": "^26",
+    "prettier": "^3.9.10",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.17",
+    "marked": "^18.1.1"
+  }
+}

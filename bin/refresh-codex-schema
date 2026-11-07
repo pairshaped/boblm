@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Record the part of the Codex app-server schema the driver depends on.
+#
+#   bin/refresh-codex-schema           rewrite crates/codex-driver/schema/surface.json
+#   bin/refresh-codex-schema --check   fail when the installed Codex no longer matches it
+#
+# The driver tests run the fake app-server, which refuses any request that sends a field
+# the recorded schema lacks or leaves out a required one. After a Codex upgrade run --check;
+# if it reports drift, refresh, read the diff, and run the driver tests.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+target=crates/codex-driver/schema/surface.json
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+codex app-server generate-json-schema --experimental --out "$work/schema" >/dev/null
+codex --version >"$work/version"
+python3 -I - "$work" "$target" "${1:-}" <<'PY'
+import json, sys
+work, target, mode = sys.argv[1:4]
+REQUESTS = ["initialize", "thread/start", "thread/resume", "thread/compact/start",
+            "turn/start", "turn/steer", "turn/interrupt", "thread/loaded/list",
+            "thread/backgroundTerminals/list", "thread/turns/list"]
+NOTIFICATIONS = ["thread/started", "turn/started", "turn/completed", "item/started",
+                 "item/completed", "item/agentMessage/delta"]
+client = json.load(open(f"{work}/schema/ClientRequest.json"))
+server = json.load(open(f"{work}/schema/ServerNotification.json"))
+by_method = {o["properties"]["method"]["enum"][0]: o for o in client["oneOf"]}
+surface = {"codex": open(f"{work}/version").read().strip(), "requests": {}, "notifications": []}
+for method in REQUESTS:
+    if method not in by_method:
+        sys.exit(f"drift: Codex no longer has the request {method}")
+    ref = by_method[method]["properties"]["params"]["$ref"].rsplit("/", 1)[1]
+    params = client["definitions"][ref]
+    surface["requests"][method] = {
+        "properties": sorted(params.get("properties", {})),
+        "required": sorted(params.get("required", [])),
+    }
+names = {o["properties"]["method"]["enum"][0] for o in server["oneOf"]}
+for method in NOTIFICATIONS:
+    if method not in names:
+        sys.exit(f"drift: Codex no longer sends the notification {method}")
+surface["notifications"] = sorted(NOTIFICATIONS)
+text = json.dumps(surface, indent=2, sort_keys=True) + "\n"
+if mode == "--check":
+    old = json.load(open(target))
+    old.pop("codex", None)
+    new = dict(surface)
+    new.pop("codex")
+    if old != new:
+        sys.exit("drift: the installed Codex differs from crates/codex-driver/schema/surface.json; run bin/refresh-codex-schema and read the diff")
+    print("codex schema surface unchanged")
+else:
+    open(target, "w").write(text)
+    print(f"wrote {target} for {surface['codex']}")
+PY

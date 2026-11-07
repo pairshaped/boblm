@@ -1,0 +1,4 @@
+CREATE TABLE runner_state (
+ session TEXT PRIMARY KEY NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+ stopped INTEGER NOT NULL DEFAULT 0 CONSTRAINT boolean CHECK (stopped IN (0, 1))
+);

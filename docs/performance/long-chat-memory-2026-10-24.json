@@ -1,0 +1,27 @@
+{
+  "before": {
+    "heapBytes": 6722916,
+    "documents": 2,
+    "nodes": 162587,
+    "jsEventListeners": 608,
+    "rows": 166,
+    "liveDomNodes": 56982
+  },
+  "cleared": {
+    "heapBytes": 5940032,
+    "documents": 2,
+    "nodes": 441,
+    "jsEventListeners": 109,
+    "rows": 0,
+    "liveDomNodes": 114
+  },
+  "repopulated": {
+    "heapBytes": 6424956,
+    "documents": 2,
+    "nodes": 43582,
+    "jsEventListeners": 239,
+    "rows": 42,
+    "liveDomNodes": 15252
+  },
+  "snapshotRequested": true
+}

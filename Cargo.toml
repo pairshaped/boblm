@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/pi-driver", "crates/codex-driver", "crates/tuning", "crates/protocol", "crates/claude-driver", "crates/live-check", "crates/store", "crates/runner", "crates/server"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync"] }
+uuid = { version = "1", features = ["v4"] }
+
+[profile.dev]
+debug = "line-tables-only"
+lto = "off"
+
+# Dependencies carry no debug info: smaller target/ and faster links. Panic
+# backtraces inside dependency code lose line numbers; our own crates keep them.
+[profile.dev.package."*"]
+debug = false
+
+# No panic = "abort" in release: Tokio isolates a panicking session task only
+# while panics unwind.
+[profile.release]
+debug = "line-tables-only"
+lto = "thin"
+strip = true
