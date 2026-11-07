@@ -1,8 +1,8 @@
 # BobLM
 
 A small, self-hosted web app for running coding agents from your desktop or phone.
-It runs Claude Code and Codex on one machine, keeps chat history in SQLite, and
-streams their work to your browser.
+It runs Claude Code, Codex and Pi (DeepSeek through DeepInfra) on one machine, keeps
+chat history in SQLite, and streams their work to your browser.
 
 ## Why I built it
 
