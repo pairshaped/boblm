@@ -4889,6 +4889,8 @@ export function view(model: Model): VNode<Model> {
                 id: "composer",
                 "data-session-id": session.sessionId,
                 "aria-label": "Message",
+                // Without this, iOS Safari offers contact AutoFill above the keyboard.
+                autocomplete: "off",
                 rows: 1,
                 value: "",
                 readOnly: sending,
@@ -5453,6 +5455,7 @@ function renameChatDialog(
       h("input", {
         "aria-label": "Chat name",
         placeholder: "Name of chat...",
+        autocomplete: "off",
         value: chat.name,
         maxLength: limits.maxChatNameChars,
         readOnly: chat.saving,
@@ -5528,6 +5531,7 @@ function newChatDialog(
       h("input", {
         "aria-label": "Chat name",
         placeholder: "Name of chat...",
+        autocomplete: "off",
         value: chat.name,
         maxLength: limits.maxChatNameChars,
         onInput: binding((event) => ({

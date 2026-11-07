@@ -117,6 +117,7 @@ export function questionsContent(model: Model) {
             ? h("textarea", {
                 "aria-label": `Answer: ${q.question}`,
                 placeholder: "Type your answer",
+                autocomplete: "off",
                 value: model.questionDrafts[q.id] ?? "",
                 readOnly: saving,
                 onInput: on.inputChanged((text) => ({
