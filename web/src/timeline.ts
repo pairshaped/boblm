@@ -3,6 +3,7 @@ import {
   type AttachmentInfo,
   type StoredEvent,
 } from "./generated/contract.ts";
+import { cleanTerminalText } from "./terminal-text.ts";
 
 export type ToolDetail = {
   key: string;
@@ -53,6 +54,30 @@ function joinText(old: string, next: string): string {
   if (old.includes(next)) return old;
   return `${old}\n${next}`;
 }
+/** A tool result with terminal escape sequences removed from its text. */
+function cleanToolResult(
+  block: Record<string, unknown>,
+): Record<string, unknown> {
+  const content = block.content;
+  if (typeof content === "string")
+    return { ...block, content: cleanTerminalText(content) };
+  if (!Array.isArray(content)) return block;
+  return {
+    ...block,
+    content: content.map((item) => {
+      if (
+        item &&
+        typeof item === "object" &&
+        !Array.isArray(item) &&
+        item.type === "text" &&
+        typeof item.text === "string"
+      )
+        return { ...item, text: cleanTerminalText(item.text) };
+      return item;
+    }),
+  };
+}
+
 /** Tool details of one more content block, without repeating one already on the row. */
 function mergeTools(
   old: ReadonlyArray<ToolDetail>,
@@ -269,7 +294,13 @@ export function projectEvents(
                 kind: call ? "call" : "result",
                 error: !call && block.is_error === true,
                 label: `${name}${call ? " call" : block.is_error ? " error" : " result"}`,
-                text: JSON.stringify(block, null, 2),
+                text: JSON.stringify(
+                  call
+                    ? block
+                    : cleanToolResult(block as Record<string, unknown>),
+                  null,
+                  2,
+                ),
               });
               return false;
             })
