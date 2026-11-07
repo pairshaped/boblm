@@ -6,7 +6,7 @@ chat history in SQLite, and streams their work to your browser.
 
 ## Why I built it
 
-I built BobLM as a smaller alternative to Happy and HAPI, focused on the parts I
+I built BobLM as a smaller alternative to HAPI, focused on the parts I
 actually use. I wanted a responsive app without carrying around a pile of features
 I don't need.
 
@@ -15,7 +15,7 @@ bundled into the server binary, including a single JavaScript bundle and stylesh
 The goal is to keep the app fast and avoid unnecessary asset loading. Long chats
 use a bounded rendering window instead of keeping the entire conversation in the
 DOM. There are [profiling results](docs/performance/long-chat-2026-10-24.md), but
-no head-to-head performance benchmark against Happy or HAPI.
+no head-to-head performance benchmark against HAPI.
 
 Keeping the feature set small is part of that design. I'm building this for my
 own workflow, and I intend to keep it that way.
