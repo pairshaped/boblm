@@ -473,8 +473,9 @@ test("peer messages start folded by origin and retain manual expansion across ar
 
 test("prompt suggestions show only in empty idle composer and Tab accepts a draft", async () => {
   const { dom, handle } = await fixture();
-  const field =
-    dom.window.document.querySelector<HTMLTextAreaElement>("#composer")!;
+  const doc = dom.window.document;
+  const field = doc.querySelector<HTMLTextAreaElement>("#composer")!;
+  const overlay = () => doc.querySelector<HTMLElement>(".composer-suggestion");
   const summary = (
     seq: number,
     promptSuggestion?: string,
@@ -497,7 +498,17 @@ test("prompt suggestions show only in empty idle composer and Tab accepts a draf
   };
   summary(1, "Explain the example");
   await handle.settle();
-  assert.equal(field.placeholder, "Explain the example");
+  assert.equal(field.hasAttribute("placeholder"), false);
+  assert.equal(field.placeholder, "");
+  assert.equal(overlay()?.textContent, "Explain the example");
+  assert.equal(
+    field.getAttribute("aria-describedby"),
+    "composer-suggestion-hint",
+  );
+  assert.equal(
+    doc.querySelector("#composer-suggestion-hint")?.textContent,
+    "Explain the example",
+  );
   handle.dispatch({
     type: "listEvent",
     event: {
@@ -509,7 +520,7 @@ test("prompt suggestions show only in empty idle composer and Tab accepts a draf
     },
   });
   await handle.settle();
-  assert.equal(field.placeholder, "Explain the example");
+  assert.equal(overlay()?.textContent, "Explain the example");
   assert.equal(field.value, "");
   const tab = new dom.window.KeyboardEvent("keydown", {
     key: "Tab",
@@ -522,17 +533,20 @@ test("prompt suggestions show only in empty idle composer and Tab accepts a draf
   assert.equal(field.value, "Explain the example");
   assert.equal(field.selectionStart, "Explain the example".length);
   assert.equal(handle.model().drafts.s, "Explain the example");
-  assert.equal(field.placeholder, "");
+  assert.equal(field.hasAttribute("placeholder"), false);
+  assert.equal(overlay(), null);
+  assert.equal(field.getAttribute("aria-describedby"), null);
   field.value = "My own prompt";
   field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   await handle.settle();
-  assert.equal(field.placeholder, "");
+  assert.equal(overlay(), null);
   field.value = "";
   field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   await handle.settle();
+  assert.equal(overlay()?.textContent, "Explain the example");
   summary(2, undefined, true);
   await handle.settle();
-  assert.equal(field.placeholder, "");
+  assert.equal(overlay(), null);
   const plainTab = new dom.window.KeyboardEvent("keydown", {
     key: "Tab",
     bubbles: true,

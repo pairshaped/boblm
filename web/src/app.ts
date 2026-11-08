@@ -4052,6 +4052,14 @@ export function view(model: Model): VNode<Model> {
   if (!model.token || model.connectionPending) return connectionDialog(model);
   const session = model.sessions.find((s) => s.sessionId === model.active);
   const sending = !!(model.active && model.pending[model.active]);
+  // The suggestion is an overlay, not a placeholder: Safari reads placeholder text
+  // as a contact-field hint and offers AutoFill above the keyboard on iOS.
+  const composerSuggestion =
+    session &&
+    !session.status.turnActive &&
+    !(model.drafts[session.sessionId] ?? "")
+      ? (session.status.promptSuggestion ?? "")
+      : "";
   const numbers = new Map(
     visibleChats(model).map((s, i) => [s.sessionId, i + 1] as const),
   );
@@ -4888,70 +4896,95 @@ export function view(model: Model): VNode<Model> {
                     ),
                   )
                 : null,
-              h("textarea", {
-                id: "composer",
-                "data-session-id": session.sessionId,
-                "aria-label": "Message",
-                // Without this, iOS Safari offers contact AutoFill above the keyboard.
-                autocomplete: "off",
-                rows: 1,
-                value: "",
-                readOnly: sending,
-                placeholder:
-                  !session.status.turnActive &&
-                  !(model.drafts[session.sessionId] ?? "")
-                    ? (session.status.promptSuggestion ?? "")
-                    : "",
-                onInput: on.inputChanged((text) => ({ type: "draft", text })),
-                onpaste: binding((event) => {
-                  const files = Array.from(
-                    (event as ClipboardEvent).clipboardData?.files ?? [],
-                  );
-                  if (!files.length) return { type: "noop" };
-                  event.preventDefault();
-                  return {
-                    type: "attach",
-                    items: files.map((file) => ({
-                      id: crypto.randomUUID(),
-                      file,
-                    })),
-                  };
-                }),
-                onkeydown: binding((event) => {
-                  const key = event as KeyboardEvent;
-                  const field = event.currentTarget as HTMLTextAreaElement;
-                  const suggestion = session.status.promptSuggestion;
-                  if (
-                    key.key === "Tab" &&
-                    !key.shiftKey &&
-                    !key.altKey &&
-                    !key.ctrlKey &&
-                    !key.metaKey &&
-                    !key.isComposing &&
-                    !sending &&
-                    !session.status.turnActive &&
-                    !field.value &&
-                    suggestion
-                  ) {
-                    key.preventDefault();
-                    field.value = suggestion;
-                    field.setSelectionRange(
-                      suggestion.length,
-                      suggestion.length,
+              h(
+                "div",
+                { class: "composer-field" },
+                h("textarea", {
+                  id: "composer",
+                  "data-session-id": session.sessionId,
+                  "aria-label": "Message",
+                  // Without this, iOS Safari offers contact AutoFill above the keyboard.
+                  autocomplete: "off",
+                  "aria-describedby": composerSuggestion
+                    ? "composer-suggestion-hint"
+                    : undefined,
+                  rows: 1,
+                  value: "",
+                  readOnly: sending,
+                  onInput: on.inputChanged((text) => ({
+                    type: "draft",
+                    text,
+                  })),
+                  onpaste: binding((event) => {
+                    const files = Array.from(
+                      (event as ClipboardEvent).clipboardData?.files ?? [],
                     );
-                    return { type: "draft", text: suggestion };
-                  }
-                  if (
-                    key.key === "Enter" &&
-                    !key.shiftKey &&
-                    !key.isComposing
-                  ) {
-                    key.preventDefault();
-                    return { type: "send", id: crypto.randomUUID() };
-                  }
-                  return { type: "noop" };
+                    if (!files.length) return { type: "noop" };
+                    event.preventDefault();
+                    return {
+                      type: "attach",
+                      items: files.map((file) => ({
+                        id: crypto.randomUUID(),
+                        file,
+                      })),
+                    };
+                  }),
+                  onkeydown: binding((event) => {
+                    const key = event as KeyboardEvent;
+                    const field = event.currentTarget as HTMLTextAreaElement;
+                    const suggestion = session.status.promptSuggestion;
+                    if (
+                      key.key === "Tab" &&
+                      !key.shiftKey &&
+                      !key.altKey &&
+                      !key.ctrlKey &&
+                      !key.metaKey &&
+                      !key.isComposing &&
+                      !sending &&
+                      !session.status.turnActive &&
+                      !field.value &&
+                      suggestion
+                    ) {
+                      key.preventDefault();
+                      field.value = suggestion;
+                      field.setSelectionRange(
+                        suggestion.length,
+                        suggestion.length,
+                      );
+                      return { type: "draft", text: suggestion };
+                    }
+                    if (
+                      key.key === "Enter" &&
+                      !key.shiftKey &&
+                      !key.isComposing
+                    ) {
+                      key.preventDefault();
+                      return { type: "send", id: crypto.randomUUID() };
+                    }
+                    return { type: "noop" };
+                  }),
                 }),
-              }),
+                composerSuggestion
+                  ? h(
+                      "span",
+                      {
+                        class: "composer-suggestion",
+                        "aria-hidden": "true",
+                      },
+                      composerSuggestion,
+                    )
+                  : null,
+                composerSuggestion
+                  ? h(
+                      "span",
+                      {
+                        id: "composer-suggestion-hint",
+                        class: "visually-hidden",
+                      },
+                      composerSuggestion,
+                    )
+                  : null,
+              ),
               h(
                 "div",
                 { class: "send-row toolbar" },

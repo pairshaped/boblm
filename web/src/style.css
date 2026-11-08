@@ -858,9 +858,12 @@ pre {
   opacity: var(--opacity-inactive-control);
   cursor: default;
 }
-.compose textarea {
+.compose textarea,
+.composer-suggestion {
   font-family: var(--font-family-chat);
   font-size: var(--font-size-chat);
+}
+.compose textarea {
   display: block;
   resize: none;
   /* One line to start, growing with the text to three times that, then scrolling. */
@@ -873,6 +876,33 @@ pre {
 }
 .compose textarea:focus-visible {
   outline: none;
+}
+.composer-field {
+  position: relative;
+}
+/* Sits where placeholder text would, so the suggestion never enters an attribute Safari reads. */
+.composer-suggestion {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  color: var(--color-muted);
+  line-height: inherit;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 .send-row {
   display: flex;
