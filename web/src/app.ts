@@ -4368,7 +4368,8 @@ export function view(model: Model): VNode<Model> {
                         { class: "session-title" },
                         s.name || "Untitled chat",
                       ),
-                      // Every row keeps a status line so rows never change height.
+                      // Open rows keep a status line so they never change height. Archived
+                      // rows have nothing to report there, so they collapse to one line.
                       statusBits.length
                         ? h(
                             "small",
@@ -4381,15 +4382,17 @@ export function view(model: Model): VNode<Model> {
                             },
                             statusBits.join(" · "),
                           )
-                        : h(
-                            "small",
-                            {
-                              class: "chat-status none",
-                              "aria-hidden": "true",
-                            },
-                            // A non-breaking space keeps the line's height with nothing shown.
-                            "\u00a0",
-                          ),
+                        : s.status.archived
+                          ? null
+                          : h(
+                              "small",
+                              {
+                                class: "chat-status none",
+                                "aria-hidden": "true",
+                              },
+                              // A non-breaking space keeps the line's height with nothing shown.
+                              "\u00a0",
+                            ),
                       s.status.archived
                         ? h(
                             "span",

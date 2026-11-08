@@ -293,3 +293,15 @@ test("only unarchived chats mid-turn show animated activity dots", async () => {
   handle.stop();
   dom.window.close();
 });
+
+test("an archived row is one line; an active row keeps its status line", async () => {
+  const { dom, handle } = await mounted(model);
+  const rows = [...dom.window.document.querySelectorAll(".session")];
+  for (const row of rows) {
+    const status = row.querySelector(".chat-status");
+    if (row.classList.contains("archived"))
+      assert.equal(status, null, "no empty status line under the title");
+    else assert.ok(status, "open rows keep their status line");
+  }
+  handle.stop();
+});

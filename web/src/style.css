@@ -141,13 +141,15 @@ small {
 }
 .session.archived {
   opacity: var(--opacity-archived-chat);
+  /* No status line: an archived row is just its title. */
+  grid-template-rows: auto;
 }
 .session {
   position: relative;
 }
 .row-delete {
   grid-column: 2;
-  grid-row: 1 / 3;
+  grid-row: 1 / -1;
   justify-self: center;
   display: grid;
   place-items: center;
