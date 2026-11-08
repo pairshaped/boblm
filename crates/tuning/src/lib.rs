@@ -389,10 +389,6 @@ pub const PI_SOPS_KEY: &[&str] = &["DEEPINFRA_API_KEY"];
 pub const PI_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Instructions appended to Pi's system prompt for unattended chats.
 pub const PI_SYSTEM_PROMPT_APPEND: &str = CLAUDE_SYSTEM_PROMPT_APPEND;
-/// Pi-only addition after PI_SYSTEM_PROMPT_APPEND. DeepSeek otherwise narrates only in its
-/// reasoning, which BobLM hides, so its chats show nothing but tool calls. Kept deliberately
-/// sparse so it does not become chatty.
-pub const PI_VISIBLE_PROGRESS_PROMPT: &str = "Your reasoning is hidden from the owner, who sees only your visible text and tool calls. Keep visible text sparse: write one short sentence when you start a new step or change direction, and a brief summary when you finish or get blocked. Don't narrate individual tool calls or repeat your reasoning.";
 /// Oldest a queued, held or unconfirmed message may be before it expires unsent.
 pub const QUEUED_MESSAGE_MAX_AGE: Duration = Duration::from_secs(6 * 60 * 60);
 /// Longest a runner sleeps before it rechecks its queue for expired messages.
