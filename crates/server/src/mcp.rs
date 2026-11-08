@@ -776,6 +776,8 @@ impl Peers {
             if args.difficulty.is_some() {
                 return Err("difficulty only applies with role. Remove it when giving model and effort.".into());
             }
+            // Accept a catalog label (terra, dsf) as well as the model ID, and store the ID.
+            let model=boblm_tuning::MODELS.iter().find(|m|m.label==model).map_or(model,|m|m.id);
             let agent=boblm_protocol::client::check_choice(model,Some(effort))?;
             let project=match &args.project_id {
                 Some(id)=>{

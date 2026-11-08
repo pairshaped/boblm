@@ -1829,6 +1829,11 @@ async fn a_bad_project_id_is_quoted_briefly_in_the_tool_error() {
             .unwrap()
             .contains("is not a model this server offers")
     );
+    // A catalog label passes the model check; this fixture then stops at its missing folder.
+    let labelled = call(&router, token, "caller", "spawn_peer", serde_json::json!({"title":"Labelled chat","requestId":"00000000-0000-4000-8000-00000000000c","message":"hi","model":"terra","effort":"medium"})).await;
+    let text = labelled["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(!text.contains("is not a model"), "{text}");
+    assert!(text.contains("project folder"), "{text}");
     let listed = tool_value(
         &call(
             &router,
