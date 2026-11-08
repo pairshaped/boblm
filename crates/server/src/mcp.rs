@@ -1338,6 +1338,13 @@ impl boblm_runner::DriverFactory for AgentFactory {
         if session.agent == "codex" {
             let mut command = tokio::process::Command::new(boblm_tuning::CODEX_BINARY);
             command.env(boblm_tuning::SESSION_ID_ENV, &session.id);
+            // Codex filters the environment its shell commands see, so set the ID there
+            // explicitly. Session IDs are UUIDs, so the TOML string needs no escaping.
+            command.arg("-c").arg(format!(
+                "shell_environment_policy.set.{}=\"{}\"",
+                boblm_tuning::SESSION_ID_ENV,
+                session.id
+            ));
             let mut home_lock = None;
             if let Some(key) = session.account_key.as_deref() {
                 let home = boblm_codex_driver::account::home_for_key(key).ok_or_else(|| {
