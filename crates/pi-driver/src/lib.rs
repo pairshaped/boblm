@@ -91,6 +91,11 @@ impl PiSession {
             std::fs::set_permissions(options.state_dir, std::fs::Permissions::from_mode(0o700))?;
             command.process_group(0);
         }
+        let system_prompt = format!(
+            "{} {}",
+            boblm_tuning::PI_SYSTEM_PROMPT_APPEND,
+            boblm_tuning::PI_VISIBLE_PROGRESS_PROMPT
+        );
         command
             .args([
                 "--mode",
@@ -103,7 +108,7 @@ impl PiSession {
                 "--model",
                 options.model,
                 "--append-system-prompt",
-                boblm_tuning::PI_SYSTEM_PROMPT_APPEND,
+                &system_prompt,
             ])
             .arg("--session-dir")
             .arg(options.state_dir.join("sessions"))
