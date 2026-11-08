@@ -37,11 +37,9 @@ Reviewers take no difficulty:
 2. Luna on the Codex plan while its weekly allowance has room, xhigh.
 3. DeepSeek V4.1 Flash 1017 through Pi, high.
 
-Grunts take no difficulty. Use them for implementation that isn't hard and for
-mechanical, well-defined work such as screenshots, browser checks, data collection
-and scripted checks. Reviewers do independent code review; implementers own hard
-implementation and repairs that need judgment, such as concurrency, delivery or
-state-machine logic and cross-module design.
+Grunts take no difficulty. Use them for mechanical, well-defined work such as
+screenshots, browser checks, data collection and scripted checks. Reviewers do
+independent code review; implementers own implementation and repairs.
 
 1. DeepSeek V4.1 Flash 1017 through Pi, high.
 2. Haiku on the Claude plan while its weekly allowance has room, high.
