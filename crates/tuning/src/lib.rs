@@ -424,6 +424,9 @@ pub const SECRET_REQUEST_TTL: Duration = Duration::from_secs(10 * 60);
 pub const SEND_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Time integration tests allow a fresh server to apply durable migrations and announce its listener.
 pub const SERVER_STARTUP_TEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Environment variable carrying the chat's BobLM session ID into every agent process and
+/// the commands and MCP helpers it starts. Stable for the life of the chat.
+pub const SESSION_ID_ENV: &str = "BOBLM_SESSION_ID";
 /// The SOPS command that writes credentials into encrypted files.
 pub const SOPS_BINARY: &str = "sops";
 /// Longest one SOPS command may run before it is killed.

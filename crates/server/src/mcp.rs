@@ -1318,8 +1318,10 @@ impl boblm_runner::DriverFactory for AgentFactory {
             let state_dir = self.uploads_dir.parent().ok_or_else(|| std::io::Error::other(
                 "Pi has no persistent data directory. Check the BobLM database path before reopening the chat."
             ))?.join("pi").join(&session.id);
+            let mut command = tokio::process::Command::new(boblm_tuning::PI_BINARY);
+            command.env(boblm_tuning::SESSION_ID_ENV, &session.id);
             let driver = crate::pi::spawn(
-                tokio::process::Command::new(boblm_tuning::PI_BINARY),
+                command,
                 directory,
                 &state_dir,
                 session.agent_session_id.as_deref(),
@@ -1335,6 +1337,7 @@ impl boblm_runner::DriverFactory for AgentFactory {
         }
         if session.agent == "codex" {
             let mut command = tokio::process::Command::new(boblm_tuning::CODEX_BINARY);
+            command.env(boblm_tuning::SESSION_ID_ENV, &session.id);
             let mut home_lock = None;
             if let Some(key) = session.account_key.as_deref() {
                 let home = boblm_codex_driver::account::home_for_key(key).ok_or_else(|| {
@@ -1371,6 +1374,7 @@ impl boblm_runner::DriverFactory for AgentFactory {
         }
         // Attachments live outside the working directory; name them for the agent.
         let mut command = tokio::process::Command::new(boblm_tuning::CLAUDE_BINARY);
+        command.env(boblm_tuning::SESSION_ID_ENV, &session.id);
         command.arg("--add-dir").arg(&self.uploads_dir);
         let driver = boblm_claude_driver::ClaudeSession::spawn_command_with_mcp(
             command,

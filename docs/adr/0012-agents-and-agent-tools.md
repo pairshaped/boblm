@@ -32,5 +32,11 @@ to the same endpoint over HTTP with a bearer token passed in the environment
 (verified live: a Codex chat called `list_projects`). Pinging another session is delivered as a steer.
 Tool calls that need the owner follow ADR 0010.
 
+Every agent process, for Claude, Codex and Pi, starts with `BOBLM_SESSION_ID` set to its
+chat's BobLM session ID: the ID peer tools use, not the provider's own conversation ID.
+Commands and MCP helpers the agent starts inherit it. It stays the same across resume and
+runner restarts, and each subagent has its own. Projects use it to tag their own calls
+with the chat that made them; it is an identifier, not a credential.
+
 Subscription limits (Claude, Codex) and per-token cost (DeepSeek) are different
 metrics. Usage meters and `usage_report` report each in its own terms (ADRs 0037 and 0042).
