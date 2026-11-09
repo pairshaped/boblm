@@ -54,6 +54,8 @@ pub const BROWSER_CONNECT_TIMEOUT_MS: u32 = 15_000;
 pub const BROWSER_RELOAD_RECEIPT_LIMIT: usize = 4096;
 /// A queued page reload expires rather than interrupting a tab much later.
 pub const BROWSER_RELOAD_TTL: Duration = Duration::from_secs(30);
+/// Weekly allowance percent left at which a Claude account stops taking new chats and subagents.
+pub const CLAUDE_ACCOUNT_CUTOFF_PERCENT: f64 = 2.0;
 /// Claude Code executable the drivers launch (looked up on PATH).
 pub const CLAUDE_BINARY: &str = "claude";
 /// Tools Claude may not use because they would wait on the owner (ADR 0010), comma separated.

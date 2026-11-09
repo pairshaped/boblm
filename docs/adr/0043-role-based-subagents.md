@@ -37,6 +37,10 @@ Reviewers take no difficulty:
 2. Luna on the Codex plan while its weekly allowance has room, xhigh.
 3. DeepSeek V4.1 Flash 1017 through Pi, high.
 
+Every Claude plan step stops taking new subagents once the account has
+CLAUDE_ACCOUNT_CUTOFF_PERCENT (2%) of its weekly allowance left. That last slice is kept
+for the chats already running on it; new work falls through to the next step.
+
 Grunts take no difficulty. Use them for mechanical, well-defined work such as
 screenshots, browser checks, data collection and scripted checks. Reviewers do
 independent code review; implementers own implementation and repairs.

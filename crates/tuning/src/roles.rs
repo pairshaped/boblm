@@ -593,7 +593,7 @@ fn claude_reason(reading: Option<&AccountReading>, now: i64) -> Result<String, S
         .weekly_resets_at
         .map(|reset| (reset - now) as f64 / 86_400.0)
         .unwrap_or(0.0);
-    let reserved = days * ROLE_R_POINTS_PER_DAY;
+    let reserved = (days * ROLE_R_POINTS_PER_DAY).max(CLAUDE_ACCOUNT_CUTOFF_PERCENT);
     if remaining > reserved {
         Ok(format!(
             "Claude has {remaining:.1} points left, above the {reserved:.1} points reserved for the next {days:.1} days."
@@ -621,13 +621,22 @@ fn weekly_plan_reason(
             "The {label} reading is past its reset, which counts as available."
         ));
     }
+    // A Claude account keeps its last few percent for the chats already running on it.
+    let limit = if account == AccountKind::ClaudePlan {
+        100.0 - CLAUDE_ACCOUNT_CUTOFF_PERCENT
+    } else {
+        100.0
+    };
     match reading.weekly_used_percent {
         None => Ok(format!(
             "The {label} has no weekly reading, which counts as available."
         )),
-        Some(used) if used < 100.0 => {
+        Some(used) if used < limit => {
             Ok(format!("The {label} weekly allowance is {used:.1}% used."))
         }
+        Some(used) if used < 100.0 => Err(format!(
+            "The {label} weekly allowance is {used:.1}% used, past the {CLAUDE_ACCOUNT_CUTOFF_PERCENT}% kept for chats already running on it."
+        )),
         Some(used) => Err(format!(
             "The {label} weekly allowance is {used:.1}% used and has not reset."
         )),
@@ -672,7 +681,8 @@ mod tests {
     fn planner_allowance_table() {
         for (used, reset, available) in [
             (0.0, 2000, true),
-            (99.9, 2000, true),
+            (97.9, 2000, true),
+            (98.5, 2000, false),
             (100.0, 2000, false),
             (100.0, 1000, true),
         ] {
@@ -1204,11 +1214,12 @@ mod tests {
             ),
             (None, None, &deepseek_out[..], Some(StepId::GruntClaude)),
             (
-                Some(99.9),
+                Some(97.9),
                 Some(reset),
                 &deepseek_out[..],
                 Some(StepId::GruntClaude),
             ),
+            (Some(98.5), Some(reset), &deepseek_out[..], None),
             (
                 Some(100.0),
                 Some(now),
