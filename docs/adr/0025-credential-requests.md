@@ -43,6 +43,23 @@ so a missing key or unreachable key service can be fixed. SOPS and the keys it n
 (`SOPS_AGE_KEY_FILE` or a cloud key service) are the server user's, and `sops` must be on
 the server's PATH.
 
+## Claude Platform API account
+
+The Haiku reviewer fallback uses account key `claude-api-a`
+(`CLAUDE_ACCOUNT_KEY_API_A`). For each launch, BobLM extracts only
+`["ANTHROPIC_API_KEY_A"]` from `~/.config/sops/user-secrets.yaml`, through the
+same one-key SOPS reader as OpenAI. `CLAUDE_API_SOPS_FILE` and
+`CLAUDE_API_SOPS_KEY_A` define that location. A missing or invalid key fails the
+spawn with the file, key path and next step, without revealing the value.
+
+The factory injects the value as `ANTHROPIC_API_KEY` only in the API child's
+environment. It never writes the key to a config, argument, event or log. The
+API child receives a private `CLAUDE_CONFIG_DIR` under the instance data directory,
+selected by `CLAUDE_ACCOUNT_HOMES`. This home has no subscription credentials;
+inherited OAuth and provider overrides are removed. Subscription children have
+API keys and auth-token overrides removed and keep their subscription config.
+Each dev instance gets its own API home as well (ADR 0014).
+
 ## Tests
 
 `crates/server/tests/secrets.rs` runs the real `sops` and `age-keygen` with a throwaway key under

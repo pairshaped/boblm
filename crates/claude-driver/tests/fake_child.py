@@ -87,6 +87,12 @@ for line in sys.stdin:
             emit({"type": "system", "subtype": "background_tasks_changed", "tasks": []})
             emit({"type": "result", "subtype": "success", "is_error": False})
         continue
+    if mode in ["api-billing-error", "api-result-error"]:
+        emit({"type": "command_lifecycle", "command_uuid": uuid, "state": "started"})
+        if mode == "api-billing-error":
+            emit({"type": "assistant", "error": "billing_error", "message": {"id": "billing-error", "model": "haiku", "content": [{"type": "text", "text": "Credit balance is too low"}]}})
+        emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "errors": [] if mode == "api-billing-error" else ["Credit balance is too low"]})
+        continue
     if mode == "block-input":
         emit({"type": "assistant", "message": {"blocked": True}})
         time.sleep(60)

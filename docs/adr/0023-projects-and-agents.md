@@ -33,8 +33,9 @@ says to start a new chat to use the other agent. The catalog's Codex entries mat
 `codex app-server` reports through `model/list`, and a live check compares them.
 
 The New chat dialog, opened from a project, asks for the model (one list, grouped by agent) and
-the reasoning effort that model supports. The model defaults to the last one chosen in this
-browser, otherwise `DEFAULT_MODEL`.
+the reasoning effort that model supports. Every new chat defaults to Opus at high
+effort (`DEFAULT_MODEL` and `DEFAULT_EFFORT`), including browsers with an earlier
+remembered choice. Existing chats keep their stored model and effort.
 
 ## Codex
 

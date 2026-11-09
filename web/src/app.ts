@@ -1553,8 +1553,6 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
     case "openNewChat": {
       const offered = (m: string | undefined) =>
         model.models.find((option) => option.model === m);
-      const last = model.lastChoice;
-      const remembered = last && offered(last.model) ? last : null;
       const first = offered(limits.defaultModel) ?? model.models[0];
       if (!first) return [model, []];
       return [
@@ -1564,14 +1562,10 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
           newChat: {
             projectId: msg.projectId,
             name: "",
-            model: remembered?.model ?? first.model,
-            effort:
-              remembered &&
-              offered(remembered.model)?.efforts.includes(
-                remembered.effort ?? "",
-              )
-                ? remembered.effort
-                : null,
+            model: first.model,
+            effort: first.efforts.includes(limits.defaultEffort)
+              ? limits.defaultEffort
+              : null,
           },
         },
         [],

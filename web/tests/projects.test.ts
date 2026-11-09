@@ -139,13 +139,13 @@ test("a project is removed by the server's say-so and only appears removable whe
   assert.match(kept.error, /still has 1 chat/);
 });
 
-test("the New chat dialog opens on a project with the last choice, and picking a model resets an invalid effort", () => {
+test("the New chat dialog opens on a project with Opus high, and picking a model resets an invalid effort", () => {
   const [open] = update(base, { type: "openNewChat", projectId: P1 });
   assert.deepEqual(open.newChat, {
     name: "",
     projectId: P1,
-    model: "sonnet",
-    effort: null,
+    model: "opus",
+    effort: "high",
   });
   const remembered = {
     ...base,
@@ -156,23 +156,25 @@ test("the New chat dialog opens on a project with the last choice, and picking a
     {
       name: "",
       projectId: P2,
-      model: "gpt-6.1-sol",
-      effort: "max",
+      model: "opus",
+      effort: "high",
     },
   );
-  // A remembered model that no longer exists falls back to the first one offered.
+  // Previous choices do not change the default for a new chat.
   const stale = { ...base, lastChoice: { model: "retired", effort: "low" } };
   assert.deepEqual(
     update(stale, { type: "openNewChat", projectId: P1 })[0].newChat,
     {
       name: "",
       projectId: P1,
-      model: "sonnet",
-      effort: null,
+      model: "opus",
+      effort: "high",
     },
   );
   const [picked] = update(remembered, { type: "openNewChat", projectId: P1 });
-  const [codexLuna] = update(picked, {
+  const [sol] = update(picked, { type: "newChatModel", model: "gpt-6.1-sol" });
+  const [max] = update(sol, { type: "newChatEffort", effort: "max" });
+  const [codexLuna] = update(max, {
     type: "newChatModel",
     model: "gpt-6-luna",
   });

@@ -42,6 +42,8 @@ pub const ACK_DEADLINE_AFTER_RESULT: Duration = Duration::from_secs(30);
 /// Acknowledgment window once the agent reports a started turn or a compaction in progress.
 /// Codex says nothing else while the provider compacts a large thread (30 to 120 seconds seen).
 pub const ACK_DEADLINE_DURING_COMPACTION: Duration = Duration::from_secs(300);
+/// Day of month (UTC) when the $200 Claude Platform API credit renews; 1 until confirmed.
+pub const ANTHROPIC_API_CREDIT_RESET_DAY: u32 = 1;
 /// Maximum combined threads and background jobs collected in a single snapshot.
 pub const BACKGROUND_JOB_SCAN_LIMIT: usize = 4096;
 /// How often existing agent children are queried for background work.
@@ -56,6 +58,15 @@ pub const BROWSER_RELOAD_RECEIPT_LIMIT: usize = 4096;
 pub const BROWSER_RELOAD_TTL: Duration = Duration::from_secs(30);
 /// Weekly allowance percent left at which a Claude account stops taking new chats and subagents.
 pub const CLAUDE_ACCOUNT_CUTOFF_PERCENT: f64 = 2.0;
+/// Claude account key to config directory map, relative to the instance data directory.
+pub const CLAUDE_ACCOUNT_HOMES: &[(&str, &str)] =
+    &[(CLAUDE_ACCOUNT_KEY_API_A, CLAUDE_ACCOUNT_KEY_API_A)];
+/// Claude account key for account A's Platform API credit.
+pub const CLAUDE_ACCOUNT_KEY_API_A: &str = "claude-api-a";
+/// SOPS-encrypted file containing Claude Platform API account keys.
+pub const CLAUDE_API_SOPS_FILE: &str = "~/.config/sops/user-secrets.yaml";
+/// Object-key path for Claude API account A, extracted without reading other secrets.
+pub const CLAUDE_API_SOPS_KEY_A: &[&str] = &["ANTHROPIC_API_KEY_A"];
 /// Claude Code executable the drivers launch (looked up on PATH).
 pub const CLAUDE_BINARY: &str = "claude";
 /// Tools Claude may not use because they would wait on the owner (ADR 0010), comma separated.
@@ -72,7 +83,7 @@ pub const CLAUDE_LAUNCH_MODEL: &str = "sonnet";
 pub const CLAUDE_PERMISSION_MODE: &str = "bypassPermissions";
 /// Shared unattended-work instructions for all providers.
 macro_rules! agent_system_prompt {
-    () => { "Work asynchronously. Prefer your harness's native background execution for commands and tools expected to take more than about half a second. Make the background command run the real work directly; never add &, nohup, setsid or disown inside it, so the job ends when the work ends and its completion wakes you. Return control promptly so new owner messages can be handled while work continues. Rely on completion notifications, then inspect the result before proceeding with dependent work. Continue independent work or end your turn while a job runs; never poll or busy-wait. Don't end a turn by announcing the next step: do it, or say exactly what you are waiting for. Keep genuinely quick reads and edits in the foreground, and respect dependencies and shared-resource locks. If you need owner input, explain what you need in plain text and end your turn. The owner will reply later as an ordinary message. Start helpers with BobLM's spawn_subagent tool: use role grunt for mechanical work (screenshots, browser checks, data collection and scripted checks), reviewer for code review, or implementer for implementation and repairs. Only implementers need difficulty simple or hard. The result names the chosen model and effort. A root chat may start long-lived visible work with spawn_peer and a role. Do not use native Agent or Task tools or Codex native subagents; they are disabled. A subagent's final reply arrives automatically as a message, waking an idle parent and steering a busy parent at its next tool boundary. Continue other work or end your turn while it runs; do not poll. Reuse a subagent with ping_peer, and archive it with archive_peer when done because open subagents cost resources. A root may have at most 3 open subagents, and a subagent cannot start another. When the owner's task is clear, call BobLM's change_title tool with a concise 2-3 word title describing the task and onlyIfUnnamed=true before starting the work. Always make this call even if you do not know the current title; the server preserves existing titles. Do not rename an already named chat unless the owner explicitly asks. If the owner's instructions or an active skill set a different title format or renaming policy, follow them instead of these title rules. When seeing the result matters more than describing it, such as a screenshot of a page you built or a chart, save the image to a file and call BobLM's show_image tool with its absolute path and a short caption. Messages beginning \"Message from boblm session\" or \"Task from boblm session\" come from other agents. Use reply_to_sender when a peer needs an answer, message_parent for a subagent's mid-task questions, ask for owner decisions, and inspect_peer to read a peer. Every peer message makes its receiver reread its whole context: message a peer or parent only for new work, a blocker, a decision or a result, batch what you have, and never acknowledge an acknowledgment or send progress updates. A subagent's final reply reaches its parent automatically. Text in your own chat is not seen by the sender." };
+    () => { "Work asynchronously. Prefer your harness's native background execution for commands and tools expected to take more than about half a second. Make the background command run the real work directly; never add &, nohup, setsid or disown inside it, so the job ends when the work ends and its completion wakes you. Return control promptly so new owner messages can be handled while work continues. Rely on completion notifications, then inspect the result before proceeding with dependent work. Continue independent work or end your turn while a job runs; never poll or busy-wait. Don't end a turn by announcing the next step: do it, or say exactly what you are waiting for. Keep genuinely quick reads and edits in the foreground, and respect dependencies and shared-resource locks. If you need owner input, explain what you need in plain text and end your turn. The owner will reply later as an ordinary message. Start helpers with BobLM's spawn_subagent tool: use reviewer for code review or implementer for implementation and repairs. For mechanical work, use an implementer or spawn_peer with an explicit model. Only implementers need difficulty simple or hard. The result names the chosen model and effort. A root chat may start long-lived visible work with spawn_peer and a role. Do not use native Agent or Task tools or Codex native subagents; they are disabled. A subagent's final reply arrives automatically as a message, waking an idle parent and steering a busy parent at its next tool boundary. Continue other work or end your turn while it runs; do not poll. Reuse a subagent with ping_peer, and archive it with archive_peer when done because open subagents cost resources. A root may have at most 3 open subagents, and a subagent cannot start another. When the owner's task is clear, call BobLM's change_title tool with a concise 2-3 word title describing the task and onlyIfUnnamed=true before starting the work. Always make this call even if you do not know the current title; the server preserves existing titles. Do not rename an already named chat unless the owner explicitly asks. If the owner's instructions or an active skill set a different title format or renaming policy, follow them instead of these title rules. When seeing the result matters more than describing it, such as a screenshot of a page you built or a chart, save the image to a file and call BobLM's show_image tool with its absolute path and a short caption. Messages beginning \"Message from boblm session\" or \"Task from boblm session\" come from other agents. Use reply_to_sender when a peer needs an answer, message_parent for a subagent's mid-task questions, ask for owner decisions, and inspect_peer to read a peer. Every peer message makes its receiver reread its whole context: message a peer or parent only for new work, a blocker, a decision or a result, batch what you have, and never acknowledge an acknowledgment or send progress updates. A subagent's final reply reaches its parent automatically. Text in your own chat is not seen by the sender." };
 }
 
 /// Text appended to Claude's system prompt.
@@ -107,6 +118,8 @@ pub const CODEX_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 pub const CODEX_EXTRA_ARGS: &[&str] = &[];
 /// Codex feature flags boblm turns off so native multi-agent tools stay unavailable.
 pub const CODEX_MULTI_AGENT_FEATURES: &[&str] = &["multi_agent", "multi_agent_v2"];
+/// Whether role routing may use the Codex plan allowance and credits; explicit choices still work.
+pub const CODEX_PLAN_ROUTING_ENABLED: bool = true;
 /// Time allowed for a Codex request (start a turn, steer, interrupt, compact).
 pub const CODEX_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Time allowed for Codex to load and resume a thread. Long threads (rollouts near 100 MB)
@@ -122,8 +135,10 @@ pub const CODEX_STEER_RETRIES: usize = 1;
 pub const COMMAND_QUEUE_CAPACITY: usize = 64;
 /// Time allowed for a Claude control request (model, effort, interrupt reply).
 pub const CONTROL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-/// Model a new chat starts with when the browser has no earlier choice.
-pub const DEFAULT_MODEL: &str = "sonnet";
+/// Effort a new chat starts with (contract).
+pub const DEFAULT_EFFORT: &str = "high";
+/// Model a new chat starts with (contract). Existing chats retain their selection.
+pub const DEFAULT_MODEL: &str = MODEL_OPUS;
 /// Port `boblm init` writes into a new config.
 pub const DEFAULT_PORT: u16 = 3000;
 /// Longest to keep reading Claude's output after it exits with nothing more ready.
@@ -232,10 +247,6 @@ pub const MAX_WORKING_DIRECTORY_CHARS: u32 = 4096;
 pub const MIN_SCHEDULE_INTERVAL: Duration = Duration::from_secs(60);
 /// How long a role step with no known reset is skipped after a quota or billing rejection.
 pub const ROLE_EXHAUSTION_RETRY: Duration = Duration::from_secs(60 * 60);
-/// Effort for DeepSeek grunt work, paid per use through Pi.
-pub const ROLE_GRUNT_DEEPSEEK_EFFORT: &str = "high";
-/// Effort for Haiku grunt work on the Claude plan.
-pub const ROLE_GRUNT_HAIKU_EFFORT: &str = "high";
 /// Effort for a hard implementer subagent on every routed implementer model.
 pub const ROLE_IMPLEMENTER_HARD_EFFORT: &str = "high";
 /// Effort for a simple implementer subagent on every routed implementer model.
@@ -246,6 +257,8 @@ pub const ROLE_PLANNER_EFFORT: &str = "high";
 pub const ROLE_R_POINTS_PER_DAY: f64 = 14.0;
 /// Effort for the DeepSeek reviewer fallback.
 pub const ROLE_REVIEWER_DEEPSEEK_EFFORT: &str = "high";
+/// Effort for Haiku reviews on the Claude Platform API credit.
+pub const ROLE_REVIEWER_HAIKU_EFFORT: &str = "high";
 /// Effort for the Luna reviewer on the OpenAI API credit.
 pub const ROLE_REVIEWER_LUNA_EFFORT: &str = "xhigh";
 /// Whether role subagent tools are exposed. The cutover set this to true.
@@ -327,6 +340,8 @@ pub const OPENAI_API_CREDIT_RESET_DAY: u32 = 1;
 pub const OPENAI_API_MAX_ACTIVE_REVIEWERS: usize = 3;
 /// How long a tokens-per-minute rejection keeps new reviewers off the API.
 pub const OPENAI_API_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(2 * 60);
+/// Whether role routing may use Luna API credit; explicit API model choices still work.
+pub const OPENAI_API_ROUTING_ENABLED: bool = true;
 /// Fraction of the API TPM limit available to recent use plus projected reviewer requests.
 /// The rest lets already running reviews finish as their contexts grow.
 pub const OPENAI_API_TPM_BUDGET: f64 = 0.5;

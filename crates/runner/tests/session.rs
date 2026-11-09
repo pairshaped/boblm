@@ -2974,6 +2974,36 @@ async fn openai_billing_rejection_marks_the_reviewer_step_until_the_monthly_rese
 }
 
 #[tokio::test]
+async fn claude_api_billing_rejection_marks_the_reviewer_step_until_the_monthly_reset() {
+    let mut h = Harness::new_role(
+        "claude",
+        Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A),
+        "reviewer-claude-api",
+    );
+    let runner = h.start().await;
+    runner.handle().resume().await.unwrap();
+    let work = h.input().await;
+    h.lifecycle(&work.uuid, LifecycleState::Started);
+    let before = now_seconds();
+    h.events
+        .send(provider_error(
+            "Claude reported an error: Credit balance is too low.",
+        ))
+        .unwrap();
+    h.events
+        .send(Event::Result {
+            subtype: Some("error_during_execution".into()),
+            is_error: Some(true),
+        })
+        .unwrap();
+    let marks = role_marks(&h.store).await;
+    assert_eq!(marks.len(), 1);
+    assert_eq!(marks[0].step, boblm_tuning::StepId::ReviewerClaudeApi);
+    assert_eq!(marks[0].until, boblm_tuning::claude_api_reset_at(before));
+    runner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn openai_tpm_rate_limit_marks_a_short_cooldown_without_replaying_the_turn() {
     let mut h = Harness::new_role(
         "codex",

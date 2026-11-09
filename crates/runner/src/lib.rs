@@ -1170,6 +1170,11 @@ impl Actor {
                 session.agent == "codex"
                     && session.account_key.as_deref() == Some(boblm_tuning::CODEX_ACCOUNT_KEY_API)
             }
+            boblm_tuning::AccountKind::ClaudeApi => {
+                session.agent == "claude"
+                    && session.account_key.as_deref()
+                        == Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A)
+            }
             boblm_tuning::AccountKind::DeepSeek => session.agent == "pi",
             _ => false,
         };
@@ -1186,6 +1191,7 @@ impl Actor {
                     .unwrap_or(i64::MAX),
             ),
             boblm_tuning::AccountKind::OpenAiApi => boblm_tuning::openai_api_reset_at(now),
+            boblm_tuning::AccountKind::ClaudeApi => boblm_tuning::claude_api_reset_at(now),
             boblm_tuning::AccountKind::DeepSeek => now.saturating_add(
                 i64::try_from(boblm_tuning::ROLE_EXHAUSTION_RETRY.as_secs()).unwrap_or(i64::MAX),
             ),
@@ -1883,7 +1889,8 @@ fn driver_error_text(message: &serde_json::Value) -> Option<String> {
     let lower = text.trim_start().to_ascii_lowercase();
     (lower.starts_with("pi stopped this turn with an error:")
         || lower.starts_with("codex stopped this turn with an error:")
-        || lower.starts_with("codex reported an error:"))
+        || lower.starts_with("codex reported an error:")
+        || lower.starts_with("claude reported an error:"))
     .then_some(text)
 }
 

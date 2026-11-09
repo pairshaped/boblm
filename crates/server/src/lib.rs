@@ -37,3 +37,5 @@ mod subagent_report;
 mod subagent_wake;
 
 pub mod persistent;
+
+mod claude_account;

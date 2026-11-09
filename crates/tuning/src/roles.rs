@@ -7,7 +7,6 @@ use crate::*;
 pub enum Role {
     Implementer,
     Reviewer,
-    Grunt,
     Planner,
 }
 
@@ -16,7 +15,6 @@ impl Role {
         match value {
             "implementer" => Some(Self::Implementer),
             "reviewer" => Some(Self::Reviewer),
-            "grunt" => Some(Self::Grunt),
             "planner" => Some(Self::Planner),
             _ => None,
         }
@@ -26,7 +24,6 @@ impl Role {
         match self {
             Self::Implementer => "implementer",
             Self::Reviewer => "reviewer",
-            Self::Grunt => "grunt",
             Self::Planner => "planner",
         }
     }
@@ -35,7 +32,6 @@ impl Role {
         match self {
             Self::Implementer => "implementer",
             Self::Reviewer => "reviewer",
-            Self::Grunt => "grunt",
             Self::Planner => "planner",
         }
     }
@@ -71,6 +67,7 @@ pub enum AccountKind {
     CodexPlan,
     ClaudePlan,
     OpenAiApi,
+    ClaudeApi,
     DeepSeek,
 }
 
@@ -80,6 +77,7 @@ impl AccountKind {
             Self::CodexPlan => "codex-plan",
             Self::ClaudePlan => "claude-plan",
             Self::OpenAiApi => "openai-api",
+            Self::ClaudeApi => "claude-api",
             Self::DeepSeek => "deepseek",
         }
     }
@@ -89,6 +87,7 @@ impl AccountKind {
             Self::CodexPlan => "Codex plan",
             Self::ClaudePlan => "Claude plan",
             Self::OpenAiApi => "OpenAI API credit",
+            Self::ClaudeApi => "Claude API credit",
             Self::DeepSeek => "DeepSeek",
         }
     }
@@ -102,10 +101,8 @@ pub enum StepId {
     ImplementerCodexCredits,
     ImplementerDeepSeek,
     ReviewerOpenAiApi,
-    ReviewerCodexPlan,
+    ReviewerClaudeApi,
     ReviewerDeepSeek,
-    GruntDeepSeek,
-    GruntClaude,
     PlannerClaude,
 }
 
@@ -116,11 +113,9 @@ impl StepId {
             "implementer-claude" => Some(Self::ImplementerClaude),
             "implementer-codex-credits" => Some(Self::ImplementerCodexCredits),
             "implementer-deepseek" => Some(Self::ImplementerDeepSeek),
-            "reviewer-codex-plan" => Some(Self::ReviewerCodexPlan),
+            "reviewer-claude-api" => Some(Self::ReviewerClaudeApi),
             "reviewer-openai-api" => Some(Self::ReviewerOpenAiApi),
             "reviewer-deepseek" => Some(Self::ReviewerDeepSeek),
-            "grunt-deepseek" => Some(Self::GruntDeepSeek),
-            "grunt-claude" => Some(Self::GruntClaude),
             "planner-claude" => Some(Self::PlannerClaude),
             _ => None,
         }
@@ -128,15 +123,10 @@ impl StepId {
 
     pub fn account(self) -> AccountKind {
         match self {
-            Self::ImplementerCodexPlan
-            | Self::ImplementerCodexCredits
-            | Self::ReviewerCodexPlan => AccountKind::CodexPlan,
-            Self::ImplementerClaude | Self::GruntClaude | Self::PlannerClaude => {
-                AccountKind::ClaudePlan
-            }
-            Self::ImplementerDeepSeek | Self::ReviewerDeepSeek | Self::GruntDeepSeek => {
-                AccountKind::DeepSeek
-            }
+            Self::ImplementerCodexPlan | Self::ImplementerCodexCredits => AccountKind::CodexPlan,
+            Self::ReviewerClaudeApi => AccountKind::ClaudeApi,
+            Self::ImplementerClaude | Self::PlannerClaude => AccountKind::ClaudePlan,
+            Self::ImplementerDeepSeek | Self::ReviewerDeepSeek => AccountKind::DeepSeek,
             Self::ReviewerOpenAiApi => AccountKind::OpenAiApi,
         }
     }
@@ -147,11 +137,9 @@ impl StepId {
             Self::ImplementerClaude => "implementer-claude",
             Self::ImplementerCodexCredits => "implementer-codex-credits",
             Self::ImplementerDeepSeek => "implementer-deepseek",
-            Self::ReviewerCodexPlan => "reviewer-codex-plan",
+            Self::ReviewerClaudeApi => "reviewer-claude-api",
             Self::ReviewerOpenAiApi => "reviewer-openai-api",
             Self::ReviewerDeepSeek => "reviewer-deepseek",
-            Self::GruntDeepSeek => "grunt-deepseek",
-            Self::GruntClaude => "grunt-claude",
             Self::PlannerClaude => "planner-claude",
         }
     }
@@ -162,17 +150,14 @@ impl StepId {
             Self::ImplementerClaude => "Claude plan allowance",
             Self::ImplementerCodexCredits => "Codex plan credits",
             Self::ImplementerDeepSeek => "DeepSeek fallback",
-            Self::ReviewerCodexPlan => "Codex plan allowance",
+            Self::ReviewerClaudeApi => "Claude API credit",
             Self::ReviewerOpenAiApi => "OpenAI API credit",
             Self::ReviewerDeepSeek => "DeepSeek fallback",
-            Self::GruntDeepSeek => "DeepSeek pay-per-use",
-            Self::GruntClaude => "Claude plan allowance",
             Self::PlannerClaude => "Claude plan allowance",
         }
     }
 
-    /// B chooses the Codex account, C supplies the API key, and D records quota marks.
-    /// Until those land, the steps that need them report not configured.
+    /// Whether the implementation for a routing step is available.
     fn configured(self) -> bool {
         matches!(
             self,
@@ -181,10 +166,8 @@ impl StepId {
                 | Self::ImplementerCodexCredits
                 | Self::ImplementerDeepSeek
                 | Self::ReviewerOpenAiApi
-                | Self::ReviewerCodexPlan
+                | Self::ReviewerClaudeApi
                 | Self::ReviewerDeepSeek
-                | Self::GruntDeepSeek
-                | Self::GruntClaude
                 | Self::PlannerClaude
         )
     }
@@ -198,10 +181,17 @@ pub struct RoleStep {
     pub account: AccountKind,
 }
 
-/// Implementer chain from boblm-390b's final decisions.
+/// Ordered implementer models and accounts.
 pub const IMPLEMENTER_STEPS: &[RoleStep] = &[
     RoleStep {
         id: StepId::ImplementerCodexPlan,
+        model: MODEL_GPT_6_1_SOL,
+        simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
+        hard_effort: ROLE_IMPLEMENTER_HARD_EFFORT,
+        account: AccountKind::CodexPlan,
+    },
+    RoleStep {
+        id: StepId::ImplementerCodexCredits,
         model: MODEL_GPT_6_1_SOL,
         simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
         hard_effort: ROLE_IMPLEMENTER_HARD_EFFORT,
@@ -215,13 +205,6 @@ pub const IMPLEMENTER_STEPS: &[RoleStep] = &[
         account: AccountKind::ClaudePlan,
     },
     RoleStep {
-        id: StepId::ImplementerCodexCredits,
-        model: MODEL_GPT_6_1_SOL,
-        simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
-        hard_effort: ROLE_IMPLEMENTER_HARD_EFFORT,
-        account: AccountKind::CodexPlan,
-    },
-    RoleStep {
         id: StepId::ImplementerDeepSeek,
         model: MODEL_DEEPSEEK_V41_FLASH,
         simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
@@ -230,7 +213,7 @@ pub const IMPLEMENTER_STEPS: &[RoleStep] = &[
     },
 ];
 
-/// Reviewer chain from boblm-390b's final decisions.
+/// Ordered reviewer models and accounts.
 pub const REVIEWER_STEPS: &[RoleStep] = &[
     RoleStep {
         id: StepId::ReviewerOpenAiApi,
@@ -240,11 +223,11 @@ pub const REVIEWER_STEPS: &[RoleStep] = &[
         account: AccountKind::OpenAiApi,
     },
     RoleStep {
-        id: StepId::ReviewerCodexPlan,
-        model: MODEL_GPT_6_LUNA,
-        simple_effort: ROLE_REVIEWER_LUNA_EFFORT,
-        hard_effort: ROLE_REVIEWER_LUNA_EFFORT,
-        account: AccountKind::CodexPlan,
+        id: StepId::ReviewerClaudeApi,
+        model: MODEL_HAIKU,
+        simple_effort: ROLE_REVIEWER_HAIKU_EFFORT,
+        hard_effort: ROLE_REVIEWER_HAIKU_EFFORT,
+        account: AccountKind::ClaudeApi,
     },
     RoleStep {
         id: StepId::ReviewerDeepSeek,
@@ -252,24 +235,6 @@ pub const REVIEWER_STEPS: &[RoleStep] = &[
         simple_effort: ROLE_REVIEWER_DEEPSEEK_EFFORT,
         hard_effort: ROLE_REVIEWER_DEEPSEEK_EFFORT,
         account: AccountKind::DeepSeek,
-    },
-];
-
-/// Grunt work runs on pay-per-use DeepSeek, with Haiku when DeepSeek is marked exhausted.
-pub const GRUNT_STEPS: &[RoleStep] = &[
-    RoleStep {
-        id: StepId::GruntDeepSeek,
-        model: MODEL_DEEPSEEK_V41_FLASH,
-        simple_effort: ROLE_GRUNT_DEEPSEEK_EFFORT,
-        hard_effort: ROLE_GRUNT_DEEPSEEK_EFFORT,
-        account: AccountKind::DeepSeek,
-    },
-    RoleStep {
-        id: StepId::GruntClaude,
-        model: MODEL_HAIKU,
-        simple_effort: ROLE_GRUNT_HAIKU_EFFORT,
-        hard_effort: ROLE_GRUNT_HAIKU_EFFORT,
-        account: AccountKind::ClaudePlan,
     },
 ];
 
@@ -286,7 +251,6 @@ pub fn steps(role: Role) -> &'static [RoleStep] {
     match role {
         Role::Implementer => IMPLEMENTER_STEPS,
         Role::Reviewer => REVIEWER_STEPS,
-        Role::Grunt => GRUNT_STEPS,
         Role::Planner => PLANNER_STEPS,
     }
 }
@@ -384,21 +348,26 @@ pub fn is_provider_exhaustion(text: &str) -> bool {
 /// When the OpenAI API credit next resets: the start of OPENAI_API_CREDIT_RESET_DAY (UTC),
 /// or the month's last day when the month is shorter.
 pub fn openai_api_reset_at(now: i64) -> i64 {
+    credit_reset_at(now, OPENAI_API_CREDIT_RESET_DAY)
+}
+
+/// Next Claude Platform API credit renewal, in UTC.
+pub fn claude_api_reset_at(now: i64) -> i64 {
+    credit_reset_at(now, ANTHROPIC_API_CREDIT_RESET_DAY)
+}
+
+fn credit_reset_at(now: i64, reset_day: u32) -> i64 {
     let days = now.div_euclid(86_400);
     let (mut year, mut month, _) = civil_from_days(days);
-    let reset_day = crate::OPENAI_API_CREDIT_RESET_DAY.min(days_in_month(year, month));
-    let mut reset = days_from_civil(year, month, reset_day) * 86_400;
+    let day = reset_day.min(days_in_month(year, month));
+    let mut reset = days_from_civil(year, month, day) * 86_400;
     if reset <= now {
         month += 1;
         if month == 13 {
             month = 1;
             year += 1;
         }
-        reset = days_from_civil(
-            year,
-            month,
-            crate::OPENAI_API_CREDIT_RESET_DAY.min(days_in_month(year, month)),
-        ) * 86_400;
+        reset = days_from_civil(year, month, reset_day.min(days_in_month(year, month))) * 86_400;
     }
     reset
 }
@@ -487,7 +456,11 @@ pub fn resolve(
         exhausted,
         headroom,
         now,
-        StepId::configured,
+        (
+            StepId::configured,
+            CODEX_PLAN_ROUTING_ENABLED,
+            OPENAI_API_ROUTING_ENABLED,
+        ),
     )
 }
 
@@ -498,10 +471,25 @@ fn resolve_with(
     exhausted: &[ExhaustedStep],
     headroom: ApiHeadroom,
     now: i64,
-    configured: impl Fn(StepId) -> bool,
+    (configured, codex_enabled, openai_enabled): (impl Fn(StepId) -> bool, bool, bool),
 ) -> RouteOutcome {
     let mut rejections = Vec::new();
     for step in steps(role) {
+        let disabled = match step.id {
+            StepId::ImplementerCodexPlan | StepId::ImplementerCodexCredits if !codex_enabled => {
+                Some("CODEX_PLAN_ROUTING_ENABLED")
+            }
+            StepId::ReviewerOpenAiApi if !openai_enabled => Some("OPENAI_API_ROUTING_ENABLED"),
+            _ => None,
+        };
+        if let Some(flag) = disabled {
+            rejections.push(StepRejection {
+                step: step.id,
+                model: step.model,
+                reason: format!("The {} step is disabled by {flag}.", step.id.label()),
+            });
+            continue;
+        }
         let effort = if role != Role::Implementer {
             step.hard_effort
         } else {
@@ -538,17 +526,18 @@ fn resolve_with(
             .find(|reading| reading.account == step.account);
         let reason = match step.id {
             StepId::ImplementerClaude => claude_reason(reading, now),
-            StepId::ImplementerCodexPlan
-            | StepId::ReviewerCodexPlan
-            | StepId::GruntClaude
-            | StepId::PlannerClaude => weekly_plan_reason(step.account, reading, now),
+            StepId::ImplementerCodexPlan | StepId::PlannerClaude => {
+                weekly_plan_reason(step.account, reading, now)
+            }
             StepId::ImplementerCodexCredits => codex_credits_reason(reading),
             StepId::ReviewerOpenAiApi => headroom.reason(),
             StepId::ImplementerDeepSeek | StepId::ReviewerDeepSeek => Ok(format!(
                 "{} is the last step and has no allowance window.",
                 step.id.label()
             )),
-            StepId::GruntDeepSeek => Ok(format!("{} has no allowance window.", step.id.label())),
+            StepId::ReviewerClaudeApi => {
+                Ok("Claude API credit has no active quota or billing exhaustion mark.".into())
+            }
         };
         match reason {
             Ok(reason) => {
@@ -678,10 +667,118 @@ mod tests {
     }
 
     #[test]
+    fn routing_chains_walk_every_available_exhausted_and_disabled_step() {
+        let now = 1000;
+        let readings = [reading(
+            AccountKind::CodexPlan,
+            Some(0.0),
+            Some(2000),
+            Some(10.0),
+        )];
+        for (role, expected) in [
+            (
+                Role::Implementer,
+                vec![
+                    StepId::ImplementerCodexPlan,
+                    StepId::ImplementerCodexCredits,
+                    StepId::ImplementerClaude,
+                    StepId::ImplementerDeepSeek,
+                ],
+            ),
+            (
+                Role::Reviewer,
+                vec![
+                    StepId::ReviewerOpenAiApi,
+                    StepId::ReviewerClaudeApi,
+                    StepId::ReviewerDeepSeek,
+                ],
+            ),
+        ] {
+            assert_eq!(
+                steps(role).iter().map(|step| step.id).collect::<Vec<_>>(),
+                expected
+            );
+            for (codex, openai) in [(true, true), (false, true), (true, false), (false, false)] {
+                let enabled = expected
+                    .iter()
+                    .copied()
+                    .filter(|step| match step {
+                        StepId::ImplementerCodexPlan | StepId::ImplementerCodexCredits => codex,
+                        StepId::ReviewerOpenAiApi => openai,
+                        _ => true,
+                    })
+                    .collect::<Vec<_>>();
+                let mut marks = Vec::new();
+                for step in enabled {
+                    for difficulty in [Difficulty::Simple, Difficulty::Hard] {
+                        let RouteOutcome::Chosen(route) = resolve_with(
+                            role,
+                            difficulty,
+                            &readings,
+                            &marks,
+                            ApiHeadroom::default(),
+                            now,
+                            (all_configured, codex, openai),
+                        ) else {
+                            panic!()
+                        };
+                        assert_eq!(route.step, step);
+                        assert_eq!(route.account, step.account());
+                        if role == Role::Implementer {
+                            assert_eq!(
+                                route.effort,
+                                if difficulty == Difficulty::Simple {
+                                    ROLE_IMPLEMENTER_SIMPLE_EFFORT
+                                } else {
+                                    ROLE_IMPLEMENTER_HARD_EFFORT
+                                }
+                            );
+                        }
+                        if !codex && role == Role::Implementer {
+                            assert_eq!(
+                                route
+                                    .reason
+                                    .matches("disabled by CODEX_PLAN_ROUTING_ENABLED")
+                                    .count(),
+                                2
+                            );
+                        }
+                        if !openai && role == Role::Reviewer {
+                            assert!(
+                                route
+                                    .reason
+                                    .contains("disabled by OPENAI_API_ROUTING_ENABLED")
+                            );
+                        }
+                    }
+                    marks.push(ExhaustedStep {
+                        step,
+                        until: now + 10,
+                    });
+                }
+                let RouteOutcome::Exhausted(reasons) = resolve_with(
+                    role,
+                    Difficulty::Simple,
+                    &readings,
+                    &marks,
+                    ApiHeadroom::default(),
+                    now,
+                    (all_configured, codex, openai),
+                ) else {
+                    panic!()
+                };
+                assert_eq!(reasons.len(), expected.len());
+            }
+        }
+        assert_eq!(Role::parse("grunt"), None);
+    }
+
+    #[test]
     fn planner_allowance_table() {
         for (used, reset, available) in [
             (0.0, 2000, true),
             (97.9, 2000, true),
+            (98.0, 2000, false),
             (98.5, 2000, false),
             (100.0, 2000, false),
             (100.0, 1000, true),
@@ -720,7 +817,6 @@ mod tests {
         for step in IMPLEMENTER_STEPS
             .iter()
             .chain(REVIEWER_STEPS)
-            .chain(GRUNT_STEPS)
             .chain(PLANNER_STEPS)
         {
             let model = MODELS
@@ -811,7 +907,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            configured,
+            (
+                configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -830,7 +930,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            configured,
+            (
+                configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -849,7 +953,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            configured,
+            (
+                configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -880,7 +988,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            configured,
+            (
+                configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -899,7 +1011,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            configured,
+            (
+                configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -923,7 +1039,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            all_configured,
+            (
+                all_configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -940,7 +1060,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            all_configured,
+            (
+                all_configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -957,7 +1081,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            all_configured,
+            (
+                all_configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -970,7 +1098,11 @@ mod tests {
             &[],
             ApiHeadroom::default(),
             now,
-            all_configured,
+            (
+                all_configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -999,7 +1131,11 @@ mod tests {
             &marks,
             ApiHeadroom::default(),
             now,
-            configured,
+            (
+                configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -1016,7 +1152,11 @@ mod tests {
             &marks,
             ApiHeadroom::default(),
             now,
-            configured,
+            (
+                configured,
+                CODEX_PLAN_ROUTING_ENABLED,
+                OPENAI_API_ROUTING_ENABLED,
+            ),
         ) else {
             panic!()
         };
@@ -1061,214 +1201,46 @@ mod tests {
     }
 
     #[test]
-    fn reviewer_chain_respects_headroom_boundaries_and_plan_allowance() {
-        let now = 1_000_000;
+    fn reviewer_headroom_falls_back_to_claude_api() {
         let budget = (OPENAI_API_TPM_LIMIT as f64 * OPENAI_API_TPM_BUDGET) as u64;
-        for (recent, projected, active, used, reset, marked_api, expected) in [
-            (
-                budget - 1,
-                0,
-                0,
-                100.0,
-                now + 1,
-                false,
-                StepId::ReviewerOpenAiApi,
-            ),
-            (budget, 0, 0, 0.0, now + 1, false, StepId::ReviewerCodexPlan),
-            (
-                budget - 1,
-                1,
-                0,
-                0.0,
-                now + 1,
-                false,
-                StepId::ReviewerCodexPlan,
-            ),
-            (
-                0,
-                budget + 1,
-                0,
-                0.0,
-                now + 1,
-                false,
-                StepId::ReviewerCodexPlan,
-            ),
+        for (tokens, projected, active, expected) in [
+            (budget - 1, 0, 0, StepId::ReviewerOpenAiApi),
+            (budget, 0, 0, StepId::ReviewerClaudeApi),
+            (budget - 1, 1, 0, StepId::ReviewerClaudeApi),
             (
                 0,
                 0,
                 OPENAI_API_MAX_ACTIVE_REVIEWERS - 1,
-                0.0,
-                now + 1,
-                false,
                 StepId::ReviewerOpenAiApi,
             ),
             (
                 0,
                 0,
                 OPENAI_API_MAX_ACTIVE_REVIEWERS,
-                0.0,
-                now + 1,
-                false,
-                StepId::ReviewerCodexPlan,
+                StepId::ReviewerClaudeApi,
             ),
-            (
-                0,
-                0,
-                OPENAI_API_MAX_ACTIVE_REVIEWERS + 1,
-                100.0,
-                now + 1,
-                false,
-                StepId::ReviewerDeepSeek,
-            ),
-            (budget, 0, 0, 100.0, now, false, StepId::ReviewerCodexPlan),
-            (0, 0, 0, 99.9, now + 1, true, StepId::ReviewerCodexPlan),
-            (0, 0, 0, 100.0, now + 1, true, StepId::ReviewerDeepSeek),
         ] {
-            let marks = if marked_api {
-                vec![ExhaustedStep {
-                    step: StepId::ReviewerOpenAiApi,
-                    until: now + 1,
-                }]
-            } else {
-                vec![]
-            };
-            let headroom = ApiHeadroom {
-                recent_tokens: recent,
-                projected_tokens: projected,
-                active_reviewers: active,
-            };
             let RouteOutcome::Chosen(route) = resolve(
                 Role::Reviewer,
                 Difficulty::Simple,
-                &[reading(
-                    AccountKind::CodexPlan,
-                    Some(used),
-                    Some(reset),
-                    Some(50.0),
-                )],
-                &marks,
-                headroom,
-                now,
+                &[],
+                &[],
+                ApiHeadroom {
+                    recent_tokens: tokens,
+                    projected_tokens: projected,
+                    active_reviewers: active,
+                },
+                1000,
             ) else {
-                panic!("the reviewer chain should have a fallback")
+                panic!()
             };
-            assert_eq!(
-                route.step, expected,
-                "{headroom:?}, plan used {used}, reset {reset}"
-            );
-            match expected {
-                StepId::ReviewerOpenAiApi | StepId::ReviewerCodexPlan => {
-                    assert_eq!(route.model, MODEL_GPT_6_LUNA);
-                    assert_eq!(route.effort, ROLE_REVIEWER_LUNA_EFFORT);
-                    assert_eq!(route.account, expected.account());
-                }
-                StepId::ReviewerDeepSeek => assert_eq!(route.effort, ROLE_REVIEWER_DEEPSEEK_EFFORT),
-                _ => panic!("unexpected reviewer step"),
-            }
-            if recent.saturating_add(projected) >= budget && !marked_api {
-                assert!(route.reason.contains("spawn budget"), "{}", route.reason);
-            } else if active >= OPENAI_API_MAX_ACTIVE_REVIEWERS && !marked_api {
-                assert!(route.reason.contains("cap of"), "{}", route.reason);
+            assert_eq!(route.step, expected);
+            if expected == StepId::ReviewerClaudeApi {
+                assert_eq!(route.model, MODEL_HAIKU);
+                assert_eq!(route.effort, ROLE_REVIEWER_HAIKU_EFFORT);
+                assert_eq!(route.account, AccountKind::ClaudeApi);
             }
         }
-        let RouteOutcome::Chosen(route) = resolve(
-            Role::Reviewer,
-            Difficulty::Simple,
-            &[],
-            &[ExhaustedStep {
-                step: StepId::ReviewerOpenAiApi,
-                until: now + 1,
-            }],
-            ApiHeadroom::default(),
-            now,
-        ) else {
-            panic!()
-        };
-        assert_eq!(
-            route.step,
-            StepId::ReviewerCodexPlan,
-            "a missing plan reading is available"
-        );
-    }
-
-    #[test]
-    fn grunt_chain_uses_deepseek_then_haiku_without_the_sonnet_reserve_or_api_credit() {
-        let now = 1_000_000;
-        let reset = now + 7 * 86_400;
-        let full_api = ApiHeadroom {
-            recent_tokens: u64::MAX,
-            projected_tokens: u64::MAX,
-            active_reviewers: OPENAI_API_MAX_ACTIVE_REVIEWERS,
-        };
-        let deepseek_out = [ExhaustedStep {
-            step: StepId::GruntDeepSeek,
-            until: now + 1,
-        }];
-        for (claude_used, claude_reset, marks, expected) in [
-            (None, None, &[][..], Some(StepId::GruntDeepSeek)),
-            (
-                Some(100.0),
-                Some(reset),
-                &[][..],
-                Some(StepId::GruntDeepSeek),
-            ),
-            (None, None, &deepseek_out[..], Some(StepId::GruntClaude)),
-            (
-                Some(97.9),
-                Some(reset),
-                &deepseek_out[..],
-                Some(StepId::GruntClaude),
-            ),
-            (Some(98.5), Some(reset), &deepseek_out[..], None),
-            (
-                Some(100.0),
-                Some(now),
-                &deepseek_out[..],
-                Some(StepId::GruntClaude),
-            ),
-            (Some(100.0), Some(reset), &deepseek_out[..], None),
-        ] {
-            // Plan allowances other than Claude's never affect grunt routing.
-            let readings = [
-                reading(AccountKind::CodexPlan, Some(100.0), Some(reset), Some(0.0)),
-                reading(AccountKind::ClaudePlan, claude_used, claude_reset, None),
-            ];
-            // Fixed efforts apply to this role regardless of the internal difficulty placeholder.
-            for difficulty in [Difficulty::Simple, Difficulty::Hard] {
-                let outcome = resolve(Role::Grunt, difficulty, &readings, marks, full_api, now);
-                match (expected, outcome) {
-                    (Some(step), RouteOutcome::Chosen(route)) => {
-                        assert_eq!(route.step, step);
-                        assert_eq!(route.account, step.account());
-                        match step {
-                            StepId::GruntDeepSeek => {
-                                assert_eq!(route.model, MODEL_DEEPSEEK_V41_FLASH);
-                                assert_eq!(route.effort, ROLE_GRUNT_DEEPSEEK_EFFORT);
-                            }
-                            StepId::GruntClaude => {
-                                assert_eq!(route.model, MODEL_HAIKU);
-                                assert_eq!(route.effort, ROLE_GRUNT_HAIKU_EFFORT);
-                                assert!(route.reason.contains("Claude plan"));
-                                assert!(!route.reason.contains("reserved"));
-                            }
-                            _ => panic!("unexpected grunt step"),
-                        }
-                    }
-                    (None, RouteOutcome::Exhausted(reasons)) => {
-                        assert_eq!(reasons.len(), GRUNT_STEPS.len());
-                    }
-                    (expected, outcome) => panic!("expected {expected:?}, got {outcome:?}"),
-                }
-            }
-        }
-        assert_eq!(Role::parse("grunt"), Some(Role::Grunt));
-        assert_eq!(Role::Grunt.as_str(), "grunt");
-        for step in GRUNT_STEPS {
-            assert_eq!(StepId::parse(step.id.as_str()), Some(step.id));
-            assert_ne!(step.account, AccountKind::OpenAiApi);
-        }
-        // Receipts from the retired Terra step no longer parse, so old marks are skipped.
-        assert_eq!(StepId::parse("grunt-codex-plan"), None);
     }
 
     #[test]
@@ -1299,8 +1271,13 @@ mod tests {
     }
 
     #[test]
-    fn openai_reset_uses_the_configured_day_of_the_next_month() {
+    fn api_reset_uses_the_configured_day_of_the_next_month() {
         assert_eq!(crate::OPENAI_API_CREDIT_RESET_DAY, 1);
+        assert_eq!(crate::ANTHROPIC_API_CREDIT_RESET_DAY, 1);
+        assert_eq!(
+            claude_api_reset_at(days_from_civil(2026, 12, 1) * 86_400),
+            days_from_civil(2027, 1, 1) * 86_400
+        );
         let noon = 12 * 3_600;
         let late_november = days_from_civil(2026, 11, 29) * 86_400 + noon;
         assert_eq!(

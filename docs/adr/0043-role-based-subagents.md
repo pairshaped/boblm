@@ -1,7 +1,7 @@
 # 0043: Role-based subagents
 
 This supersedes ADR 0015's independent-child rule for role spawns and extends
-ADR 0036's drawer. A parent asks BobLM for an implementer, reviewer, grunt or planner and never
+ADR 0036's drawer. A parent asks BobLM for an implementer, reviewer or planner and never
 chooses the model. BobLM resolves the role from a role table in the tuning crate
 and the account readings from ADR 0037. The result names the chosen model,
 effort, account, step and reason.
@@ -14,7 +14,7 @@ use are turned off for new provider launches.
 ## Roles and efforts
 
 Planners take no difficulty and use Opus high on the Claude plan. They remain
-available until the Claude weekly allowance is exhausted, without the Sonnet R
+available until the Claude weekly allowance reaches the 2% cutoff, without the Sonnet R
 reserve and without a fallback. An exhausted planner request is refused with the
 Claude reset time. Missing readings and readings past reset count as available.
 
@@ -26,50 +26,52 @@ agent guidance, not a server check: BobLM cannot determine who requested it.
 Implementers take a difficulty of `simple` or `hard`:
 
 1. Sol on the Codex plan allowance, medium or high.
-2. Sonnet on the Claude plan while Claude's remaining weekly allowance is above
+2. Sol on the Codex plan credits while the balance is positive, medium or high.
+3. Sonnet on the Claude plan while Claude's remaining weekly allowance is above
    the days to reset times R, medium or high.
-3. Sol on the Codex plan credits while the balance is positive, medium or high.
 4. DeepSeek V4.1 Flash 1017 through Pi, medium or high.
 
 Reviewers take no difficulty:
 
 1. Luna on the OpenAI API credit while API headroom is available, xhigh.
-2. Luna on the Codex plan while its weekly allowance has room, xhigh.
+2. Haiku on the Claude Platform API credit, high.
 3. DeepSeek V4.1 Flash 1017 through Pi, high.
 
 Every Claude plan step stops taking new subagents once the account has
 CLAUDE_ACCOUNT_CUTOFF_PERCENT (2%) of its weekly allowance left. That last slice is kept
 for the chats already running on it; new work falls through to the next step.
 
-Grunts take no difficulty. Use them for mechanical, well-defined work such as
-screenshots, browser checks, data collection and scripted checks. Reviewers do
-independent code review; implementers own implementation and repairs.
+The grunt role is retired. Both spawn tools refuse new grunt requests with a plain
+sentence directing callers to an implementer or `spawn_peer` with an explicit
+model for mechanical work. Stored sessions and receipts retain their role and
+remain readable. Reviewers do independent code review; implementers own
+implementation and repairs.
 
-1. DeepSeek V4.1 Flash 1017 through Pi, high.
-2. Haiku on the Claude plan while its weekly allowance has room, high.
+`CODEX_PLAN_ROUTING_ENABLED` and `OPENAI_API_ROUTING_ENABLED` are documented
+tunables, both true. Disabling the first skips both Sol plan and credits steps;
+disabling the second skips Luna API reviews. The route reason names the flag,
+for example "disabled by CODEX_PLAN_ROUTING_ENABLED". Drivers, the model catalog
+and explicit model choices keep working. There is no settings screen (ADR 0018).
 
-DeepSeek is paid per use and has no allowance window, so grunts reach Haiku only
-while DeepSeek is marked exhausted after a quota or billing rejection. Haiku has no
-R reserve, so it remains available until the Claude weekly allowance is exhausted.
-Missing or expired readings count as available, as they do for the other plan steps.
-Terra is not a grunt step: its grunt work needed too much correction.
-
-Decision 44 removed the implementer's OpenAI API step for now. The API credit is
-for Luna reviews only, so its depletion rate can be measured. The API project also
-has no Sol access. Revisit the implementer step when that rate is known.
+The OpenAI API credit is reserved for Luna reviews. Implementers use the ordered
+plan, credits, Claude and DeepSeek chain above.
 R starts at 14 percentage points of the Claude weekly plan per day
-(`ROLE_R_POINTS_PER_DAY`). It is measured later from `usage_report`. There are no
-floors: an allowance may be used to zero. A reading past its reset counts as
-available, and a plan account with no reading counts as available. A step with an
+(`ROLE_R_POINTS_PER_DAY`). It is measured later from `usage_report`. A reading
+past its reset counts as available, and a plan account with no reading counts as
+available. A step with an
 active quota or billing exhaustion mark is skipped until its reset. There are no
 BobLM spend budgets; provider limits remain the owner's controls. The generous
 per-round runaway backstop below catches subagents that keep going unchecked.
 
-The runner detects a provider quota or billing rejection in a role subagent's Pi or
-Codex error sentence and marks that chat's routed step, after checking that the
-session's provider account matches the step. An
+The runner detects a provider quota or billing rejection in a role chat's Pi,
+Codex or Claude error envelope and marks that chat's routed step, after checking
+that the session's provider account matches the step. An
 OpenAI API quota or billing mark lasts until the start of the next OPENAI_API_CREDIT_RESET_DAY (the 1st, the ChatGPT plan renewal date) UTC, or the month's
-last day when it is shorter. A step with no known reset, currently DeepSeek, is
+last day when it is shorter. The Claude API account has $200 of monthly credit;
+quota or billing rejection marks Haiku exhausted until the next
+`ANTHROPIC_API_CREDIT_RESET_DAY` UTC. That tunable defaults to 1 until the actual
+renewal date is known. It uses exhaustion marks, without the Claude plan cutoff
+or Sonnet reserve. A step with no known reset, currently DeepSeek, is
 retried after `ROLE_EXHAUSTION_RETRY` (one hour). The resolver reads the marks in
 the same request that chooses a route, so a marked step is skipped immediately.
 
@@ -104,7 +106,7 @@ of the usage records contained 983 API Luna calls in the latest day, averaging
 about 742,000 tokens before counting recent completed requests. This is a spawn guard, not a guarantee against a provider rate limit;
 long reviews keep their account and may send several requests per minute.
 The route reason includes the measured number that blocked an API spawn and
-the chosen fallback. Plan fallback depends on weekly allowance, not credits.
+the chosen fallback. Haiku API fallback depends on credit exhaustion marks.
 
 The role table, efforts, R and model IDs are constants in `crates/tuning`. The
 resolver is pure: `resolve(role, difficulty, readings, exhausted_marks, api_headroom, now)`
@@ -152,13 +154,23 @@ code stays for chats started before the cutover.
 
 ## Parent and lifetime
 
-A chat may record a Codex `account_key`. The tuning table
+A chat may record a provider `account_key`. The tuning table
 `CODEX_ACCOUNT_HOMES` maps `codex-plan` and `codex-api` to their CODEX_HOME
 directories; a null key keeps the inherited environment. The AgentFactory sets
 that home on the Codex child and reads the account ID from it. Role spawns set the
 key from the chosen route: the Codex plan steps use `codex-plan`, and the OpenAI
 API step uses `codex-api`. That home's provider reads the OpenAI key from the
 child environment, injected from SOPS per spawn (ADR 0023).
+
+`CLAUDE_ACCOUNT_KEY_API_A` names `claude-api-a`. `CLAUDE_ACCOUNT_HOMES` maps it to
+an isolated config directory relative to the instance data directory. The factory
+sets `CLAUDE_CONFIG_DIR` on that child and injects `ANTHROPIC_API_KEY` from the
+single SOPS key `ANTHROPIC_API_KEY_A` (ADR 0025). It removes inherited OAuth,
+auth-token and provider-override variables from API children. Subscription children
+never inherit an API key or auth-token override. The API home has no subscription
+login, and the API account identity is `claude-api-a`, separate from subscription
+usage. Missing credentials fail the spawn; they never select a subscription login.
+
 
 A subagent session records `parent_session_id`, `root_session_id` and `role` in
 the same spawn transaction as the child and its first input. A plain root has all
@@ -220,7 +232,7 @@ Only subagents have a runaway limit. Root chats, including role-routed visible
 roots, are never limited. `SUBAGENT_ROUND_MAX_TOKENS` is 400,000,000 input,
 cache-read, cache-write and output tokens combined; `SUBAGENT_ROUND_MAX_CALLS`
 is 3,000 model calls. Both tunables are deliberately generous: measured lifetime
-maxima were 3.1 million input tokens and 55 calls for grunts, 51.5 million input
+maxima were 51.5 million input
 and 122,000 output tokens over 215 calls for implementers, and 111 million input
 and 1.19 million output tokens over 809 calls for reviewers. A long review can
 span several rounds. These ceilings catch runaway work rather than budget normal

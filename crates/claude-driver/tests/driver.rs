@@ -554,3 +554,36 @@ async fn prompt_suggestion_tolerates_unknown_shapes() {
     );
     session.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn claude_api_billing_errors_reach_the_runner_before_the_failed_result() {
+    let mut session = fake(None).await;
+    assert!(matches!(next(&mut session).await, Event::System { .. }));
+    for mode in ["api-billing-error", "api-result-error"] {
+        assert_eq!(
+            session.dispatch(mode, mode, None, DEADLINE).await,
+            SteerOutcome::Started
+        );
+        let mut errors = 0;
+        loop {
+            match next(&mut session).await {
+                Event::Assistant { message } => {
+                    let text = message["content"][0]["text"].as_str().unwrap();
+                    assert!(text.starts_with("Claude reported an error:"));
+                    assert!(boblm_tuning::is_provider_exhaustion(text));
+                    if mode == "api-billing-error" {
+                        assert_eq!(message["id"], "billing-error");
+                    }
+                    errors += 1;
+                }
+                Event::Result { is_error, .. } => {
+                    assert_eq!(is_error, Some(true));
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(errors, 1);
+    }
+    session.stop().await.unwrap();
+}

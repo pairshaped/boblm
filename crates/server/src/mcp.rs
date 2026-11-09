@@ -142,9 +142,9 @@ struct SpawnArgs {
     model: Option<String>,
     /// The model's effort. Omit when role is given.
     effort: Option<String>,
-    /// implementer, reviewer, grunt or planner. An alternative to model and effort.
+    /// implementer, reviewer or planner. An alternative to model and effort.
     role: Option<String>,
-    /// simple or hard, required for an implementer role and invalid for a reviewer, grunt or planner.
+    /// simple or hard, required for an implementer role and invalid for a reviewer or planner.
     difficulty: Option<String>,
     /// The project to create the chat in, from list_projects. Omit or null for your own project.
     project_id: Option<String>,
@@ -157,9 +157,9 @@ struct SpawnSubagentArgs {
     /// Required chat title, 1 to 200 characters.
     title: String,
     message: String,
-    /// implementer, reviewer, grunt or planner.
+    /// implementer, reviewer or planner.
     role: String,
-    /// simple or hard, required for an implementer and invalid for a reviewer, grunt or planner.
+    /// simple or hard, required for an implementer and invalid for a reviewer or planner.
     difficulty: Option<String>,
     /// Optional folder inside your project. Defaults to your working folder.
     working_directory: Option<String>,
@@ -764,7 +764,7 @@ impl Peers {
         )
     }
     #[tool(
-        description = "Create a chat with a required title and accept its first work message immediately. Give either model and effort explicitly, or role (implementer, reviewer, grunt or planner) with difficulty only for an implementer. planner: only when the owner explicitly asks for a planner. Use grunt for mechanical work such as screenshots, browser checks, data collection and scripted checks; use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). A role spawn is resolved once and stored on the receipt, so an identical retry never re-resolves. Role spawn_peer creates a visible root chat; use spawn_subagent for a hidden subagent. Supply a fresh requestId UUID; an identical explicit retry returns the same child and never replays held or uncertain input. The title is part of the retry identity, so a different title with the same requestId conflicts. accepted means persisted, not consumed. Inspect the returned session if dispatchFailed is true."
+        description = "Create a chat with a required title and accept its first work message immediately. Give either model and effort explicitly, or role (implementer, reviewer or planner) with difficulty only for an implementer. planner: only when the owner explicitly asks for a planner. For mechanical work, use an implementer or spawn_peer with an explicit model. Use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). A role spawn is resolved once and stored on the receipt, so an identical retry never re-resolves. Role spawn_peer creates a visible root chat; use spawn_subagent for a hidden subagent. Supply a fresh requestId UUID; an identical explicit retry returns the same child and never replays held or uncertain input. The title is part of the retry identity, so a different title with the same requestId conflicts. accepted means persisted, not consumed. Inspect the returned session if dispatchFailed is true."
     )]
     async fn spawn_peer(
         &self,
@@ -850,7 +850,7 @@ impl Peers {
         }.await)
     }
     #[tool(
-        description = "Create a hidden role subagent under THIS chat with a required title, and accept its first work message. role is implementer, reviewer, grunt or planner; planner: only when the owner explicitly asks for a planner. Only implementers need difficulty simple or hard. Use grunt for mechanical work such as screenshots, browser checks, data collection and scripted checks; use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). The model, effort and account come from BobLM's role resolver and are named in the result. No subagent may spawn another subagent, and a root may have at most 3 open subagents. The result lists the parent's open subagents with idle times. After a runaway pause, inspect progress and decide whether to ping for a fresh round or archive; if unsure, ask the owner with ask before continuing. Supply a fresh requestId UUID; an identical retry returns the stored routing and never re-resolves. The title is part of the retry identity, so a different title with the same requestId conflicts."
+        description = "Create a hidden role subagent under THIS chat with a required title, and accept its first work message. role is implementer, reviewer or planner; planner: only when the owner explicitly asks for a planner. Only implementers need difficulty simple or hard. For mechanical work, use an implementer or spawn_peer with an explicit model. Use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). The model, effort and account come from BobLM's role resolver and are named in the result. No subagent may spawn another subagent, and a root may have at most 3 open subagents. The result lists the parent's open subagents with idle times. After a runaway pause, inspect progress and decide whether to ping for a fresh round or archive; if unsure, ask the owner with ask before continuing. Supply a fresh requestId UUID; an identical retry returns the stored routing and never re-resolves. The title is part of the retry identity, so a different title with the same requestId conflicts."
     )]
     async fn spawn_subagent(
         &self,
@@ -1339,7 +1339,13 @@ impl AgentFactory {
 impl boblm_runner::DriverFactory for AgentFactory {
     fn account_id(&self, session: &boblm_store::Session) -> Option<String> {
         match session.agent.as_str() {
-            "claude" => boblm_claude_driver::account::account_id(),
+            "claude" => match session.account_key.as_deref() {
+                Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A) => {
+                    Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A.into())
+                }
+                Some(_) => None,
+                None => boblm_claude_driver::account::account_id(),
+            },
             "codex" => match session.account_key.as_deref() {
                 Some(key) => boblm_codex_driver::account::account_id_for_key(key),
                 None => boblm_codex_driver::account::account_id(),
@@ -1425,6 +1431,25 @@ impl boblm_runner::DriverFactory for AgentFactory {
         // Attachments live outside the working directory; name them for the agent.
         let mut command = tokio::process::Command::new(boblm_tuning::CLAUDE_BINARY);
         command.env(boblm_tuning::SESSION_ID_ENV, &session.id);
+        let api_key =
+            if session.account_key.as_deref() == Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A) {
+                Some(
+                    crate::claude_account::api_key()
+                        .await
+                        .map_err(std::io::Error::other)?,
+                )
+            } else {
+                None
+            };
+        let data_dir = self.uploads_dir.parent().ok_or_else(|| std::io::Error::other(
+            "Claude has no persistent data directory. Check the BobLM database path before reopening the chat."
+        ))?;
+        crate::claude_account::configure(
+            &mut command,
+            data_dir,
+            session.account_key.as_deref(),
+            api_key,
+        )?;
         command.arg("--add-dir").arg(&self.uploads_dir);
         let driver = boblm_claude_driver::ClaudeSession::spawn_command_with_mcp(
             command,

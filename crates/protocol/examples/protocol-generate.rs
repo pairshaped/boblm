@@ -206,13 +206,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output.push_str(&format!("export function parse{name}(value: unknown): {name} {{ return decode(contractSchema, {name:?}, value) as {name}; }}\n"));
     }
     output.push_str(&format!(
-        "export const limits = {{ maxChatNameChars: {}, maxAttachments: {}, maxBodyBytes: {}, maxUploadBytes: {}, maxMessageChars: {}, defaultModel: {:?}, historyPageSize: {}, historyMaxRows: {}, historyResumeLatestMs: {}, historyScrollIntentMs: {}, historyScrollThreshold: {}, longPressMs: {}, longPressMovePx: {}, maxProjectNameChars: {}, notificationHeartbeatMs: {}, browserConnectTimeoutMs: {}, subagentPollMs: {}, jobsVisibleLimit: {}, queuedMessageMaxAgeHours: {}, usageHighPercent: {} }} as const;\n",
+        "export const limits = {{ maxChatNameChars: {}, maxAttachments: {}, maxBodyBytes: {}, maxUploadBytes: {}, maxMessageChars: {}, defaultModel: {:?}, defaultEffort: {:?}, historyPageSize: {}, historyMaxRows: {}, historyResumeLatestMs: {}, historyScrollIntentMs: {}, historyScrollThreshold: {}, longPressMs: {}, longPressMovePx: {}, maxProjectNameChars: {}, notificationHeartbeatMs: {}, browserConnectTimeoutMs: {}, subagentPollMs: {}, jobsVisibleLimit: {}, queuedMessageMaxAgeHours: {}, usageHighPercent: {} }} as const;\n",
         boblm_tuning::MAX_CHAT_NAME_CHARS,
         boblm_tuning::MAX_ATTACHMENTS,
         boblm_tuning::MAX_BODY_BYTES,
         boblm_tuning::MAX_UPLOAD_BYTES,
         boblm_tuning::MAX_MESSAGE_CHARS,
         boblm_tuning::DEFAULT_MODEL,
+        boblm_tuning::DEFAULT_EFFORT,
         boblm_tuning::HISTORY_PAGE_SIZE,
         boblm_tuning::HISTORY_MAX_ROWS,
         boblm_tuning::HISTORY_RESUME_LATEST_MS,

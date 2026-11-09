@@ -334,13 +334,23 @@ impl ClaudeSession {
                 let mut event = match line {
                     Ok(Some(Line::Text(bytes))) => {
                         match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            Ok(value) => match background_tasks
-                                .event(&value)
-                                .or_else(|| serde_json::from_value::<Event>(value).ok())
-                            {
-                                Some(event) => event,
-                                None => continue,
-                            },
+                            Ok(value) => {
+                                let mut provider_error = provider_error_event(&value);
+                                if value["type"] == "result"
+                                    && let Some(error) = provider_error.take()
+                                    && tx.send(error).await.is_err()
+                                {
+                                    break 'read;
+                                }
+                                match background_tasks
+                                    .event(&value)
+                                    .or(provider_error)
+                                    .or_else(|| serde_json::from_value::<Event>(value).ok())
+                                {
+                                    Some(event) => event,
+                                    None => continue,
+                                }
+                            }
                             Err(_) => continue,
                         }
                     }
@@ -718,5 +728,63 @@ impl Drop for ClaudeSession {
         self.worker.abort();
         self.pending.lock().expect("pending lock").clear();
         self.controls.lock().expect("control lock").clear();
+    }
+}
+
+/// Only Claude's error envelopes identify provider failures; ordinary answers cannot exhaust credit.
+fn provider_error_event(value: &serde_json::Value) -> Option<Event> {
+    let text = if value["type"] == "assistant" && value["error"].is_string() {
+        value["message"]["content"]
+            .as_array()?
+            .iter()
+            .filter(|block| block["type"] == "text")
+            .filter_map(|block| block["text"].as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else if value["type"] == "result" && value["is_error"] == true {
+        value["errors"]
+            .as_array()?
+            .iter()
+            .filter_map(|error| error.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        return None;
+    };
+    if text.is_empty() {
+        return None;
+    }
+    let mut message = value["message"].as_object().cloned().unwrap_or_default();
+    message.insert(
+        "content".into(),
+        serde_json::json!([
+            {"type":"text", "text": format!("Claude reported an error: {text}")}
+        ]),
+    );
+    Some(Event::Assistant {
+        message: message.into(),
+    })
+}
+
+#[cfg(test)]
+mod provider_error_tests {
+    use super::*;
+    #[test]
+    fn claude_provider_error_envelopes_preserve_billing_cause() {
+        for value in [
+            serde_json::json!({"type":"assistant", "error":"billing_error", "message":{"content":[{"type":"text","text":"Credit balance is too low"}]}}),
+            serde_json::json!({"type":"result", "is_error":true,"errors":["Credit balance is too low"]}),
+        ] {
+            let Some(Event::Assistant { message }) = provider_error_event(&value) else {
+                panic!()
+            };
+            assert!(
+                message["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Claude reported an error:")
+            );
+        }
+        assert!(provider_error_event(&serde_json::json!({"type":"assistant", "message":{"content":[{"type":"text","text":"Credit balance is too low"}]}})).is_none());
     }
 }

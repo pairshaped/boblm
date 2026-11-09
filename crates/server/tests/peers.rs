@@ -2159,10 +2159,22 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
     );
     let fallback = routes
         .iter()
-        .find(|route| route["routing"]["step"] == "reviewer-codex-plan")
+        .find(|route| route["routing"]["step"] == "reviewer-claude-api")
         .unwrap();
-    assert_eq!(fallback["routing"]["model"], "gpt-6-luna");
-    assert_eq!(fallback["routing"]["effort"], "xhigh");
+    assert_eq!(fallback["routing"]["model"], "haiku");
+    assert_eq!(fallback["routing"]["effort"], "high");
+    let saved = store
+        .reader()
+        .unwrap()
+        .sessions()
+        .unwrap()
+        .into_iter()
+        .find(|session| session.id == fallback["sessionId"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(
+        saved.account_key.as_deref(),
+        Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A)
+    );
     assert!(
         fallback["routing"]["reason"]
             .as_str()
@@ -2202,7 +2214,7 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
 }
 
 #[tokio::test]
-async fn grunt_spawns_accept_no_difficulty_and_route_deepseek_then_haiku() {
+async fn grunt_spawns_are_refused() {
     let temp = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
     let store = Store::open(temp.path().join("grunt-routing.sqlite")).unwrap();
     store
@@ -2223,53 +2235,17 @@ async fn grunt_spawns_accept_no_difficulty_and_route_deepseek_then_haiku() {
         "message":"Take the requested screenshots", "role":"grunt"
     });
     for tool in ["spawn_subagent", "spawn_peer"] {
-        let mut invalid = args.clone();
-        invalid["difficulty"] = serde_json::json!("simple");
-        let refused = call(&router, token, "caller", tool, invalid).await;
-        assert_eq!(refused["result"]["isError"], true);
-        assert!(
-            refused["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("grunt takes no difficulty")
-        );
+        for difficulty in [None, Some("simple")] {
+            let mut invalid = args.clone();
+            if let Some(difficulty) = difficulty {
+                invalid["difficulty"] = serde_json::json!(difficulty);
+            }
+            let refused = call(&router, token, "caller", tool, invalid).await;
+            assert_eq!(refused["result"]["isError"], true);
+            assert!(refused["result"]["content"][0]["text"].as_str().unwrap().contains("The grunt role was retired. Use an implementer, or spawn_peer with an explicit model for mechanical work."));
+        }
     }
-    let child = tool_value(&call(&router, token, "caller", "spawn_subagent", args.clone()).await);
-    assert_eq!(child["session"]["role"], "grunt");
-    assert_eq!(child["session"]["parentSessionId"], "caller");
-    assert_eq!(child["routing"]["step"], "grunt-deepseek");
-    assert_eq!(
-        child["routing"]["model"],
-        boblm_tuning::MODEL_DEEPSEEK_V41_FLASH
-    );
-    assert_eq!(child["routing"]["effort"], "high");
-    let sessions = store.reader().unwrap().sessions().unwrap();
-    let saved = sessions
-        .iter()
-        .find(|session| session.id == args["requestId"].as_str().unwrap())
-        .unwrap();
-    assert_eq!(saved.account_key, None);
-
-    store
-        .mark_role_step_exhausted(
-            boblm_tuning::StepId::GruntDeepSeek,
-            i64::MAX,
-            1,
-            "fixture quota",
-        )
-        .unwrap();
-    let mut root_args = args.clone();
-    root_args["requestId"] = serde_json::json!("00000000-0000-4000-8000-000000000602");
-    let root = tool_value(&call(&router, token, "caller", "spawn_peer", root_args).await);
-    assert_eq!(root["routing"]["step"], "grunt-claude");
-    assert_eq!(root["routing"]["model"], "haiku");
-    assert_eq!(root["routing"]["effort"], "high");
-    assert_eq!(root["routing"]["account"], "claude-plan");
-    assert_eq!(root["session"]["role"], "grunt");
-    assert!(root["session"].get("parentSessionId").is_none());
-    let repeated = tool_value(&call(&router, token, "caller", "spawn_subagent", args).await);
-    assert_eq!(repeated["alreadyAccepted"], true);
-    assert_eq!(repeated["routing"], child["routing"]);
+    assert_eq!(store.reader().unwrap().sessions().unwrap().len(), 1);
     app.shutdown().await.unwrap();
 }
 
@@ -2505,4 +2481,90 @@ async fn compact_is_caller_bound_and_reports_context_on_acceptance_and_refusal()
         serde_json::from_str(inspected["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(inspected["session"]["status"]["queued"], 0);
     app.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn retired_grunt_sessions_and_receipts_still_load_and_display() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("legacy.sqlite")).unwrap();
+    store
+        .create_session("root", temp.path().to_str().unwrap(), 1)
+        .unwrap();
+    let project = store.reader().unwrap().sessions().unwrap()[0]
+        .project_id
+        .clone()
+        .unwrap();
+    let receipt = serde_json::json!({"role":"grunt","difficulty":"simple","model":"haiku","effort":"high","account":"claude-plan","step":"grunt-claude","reason":"Legacy route"});
+    store
+        .spawn_peer(boblm_store::PeerSpawn {
+            request_id: "10000000-0000-4000-8000-000000000099".into(),
+            caller: "root".into(),
+            arguments: "{}".into(),
+            project_id: project,
+            agent: "claude".into(),
+            model: "haiku".into(),
+            effort: "high".into(),
+            title: "Legacy grunt".into(),
+            content: "old work".into(),
+            created_at: 2,
+            parent_session_id: Some("root".into()),
+            root_session_id: Some("root".into()),
+            role: Some("grunt".into()),
+            resolved: Some(receipt.to_string()),
+            working_directory: None,
+            account_key: None,
+        })
+        .unwrap();
+    let saved = store
+        .reader()
+        .unwrap()
+        .peer_spawn_receipt("10000000-0000-4000-8000-000000000099")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        boblm_server::role_spawn::route_from_json(
+            &serde_json::from_str::<serde_json::Value>(&saved.resolved.unwrap()).unwrap()
+        )
+        .unwrap(),
+        receipt
+    );
+    let app = App::open(store, Arc::new(NeverSpawn), "legacy-test-token".into())
+        .await
+        .unwrap();
+    let router = app.router(Some(temp.path().into()));
+    let listed = tool_value(
+        &call(
+            &router,
+            "legacy-test-token",
+            "root",
+            "list_peers",
+            serde_json::json!({}),
+        )
+        .await,
+    );
+    assert_eq!(listed["sessions"][0]["role"], "grunt");
+    app.shutdown().await.unwrap();
+}
+
+#[test]
+fn claude_api_usage_never_becomes_a_subscription_reading_without_a_keyed_chat() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("api-usage.sqlite")).unwrap();
+    for (id, account, used) in [
+        ("old-api", boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A, 0.0),
+        ("plan", "subscription", 100.0),
+    ] {
+        store.create_session(id, "/fake", 1).unwrap();
+        store.set_session_account(id, Some(account)).unwrap();
+        store.record_event(id, "agent_event", serde_json::json!({"type":"usage","weekly":{"usedPercent":used,"resetsAt":4000000000_i64}}), 2).unwrap();
+    }
+    let outcome = boblm_server::role_spawn::resolve_route(
+        &store,
+        boblm_tuning::Role::Planner,
+        boblm_tuning::Difficulty::Simple,
+    );
+    assert!(
+        outcome.is_err(),
+        "API usage cannot make the exhausted Claude plan available"
+    );
 }

@@ -37,9 +37,12 @@ pub fn with_reply_trailer(content: &str, trailer: ReplyTrailer) -> String {
 }
 
 pub fn parse_role(role: &str, difficulty: Option<&str>) -> Result<(Role, Difficulty), String> {
+    if role.trim() == "grunt" {
+        return Err("The grunt role was retired. Use an implementer, or spawn_peer with an explicit model for mechanical work.".into());
+    }
     let role = Role::parse(role.trim()).ok_or_else(|| {
         format!(
-            "role must be implementer, reviewer, grunt or planner; {} is not a role.",
+            "role must be implementer, reviewer or planner; {} is not a role.",
             boblm_protocol::client::shown(role)
         )
     })?;
@@ -60,11 +63,11 @@ pub fn parse_role(role: &str, difficulty: Option<&str>) -> Result<(Role, Difficu
             "An implementer spawn needs a difficulty of simple or hard. Give one and try again."
                 .into(),
         ),
-        (Role::Reviewer | Role::Grunt | Role::Planner, Some(_)) => Err(format!(
+        (Role::Reviewer | Role::Planner, Some(_)) => Err(format!(
             "A {} takes no difficulty. Omit difficulty; this role uses its fixed effort.",
             role.label()
         )),
-        (Role::Reviewer | Role::Grunt | Role::Planner, None) => Ok((role, Difficulty::Simple)),
+        (Role::Reviewer | Role::Planner, None) => Ok((role, Difficulty::Simple)),
     }
 }
 
@@ -98,6 +101,9 @@ pub fn resolve_route(
     let mut readings = Vec::new();
     for usage in usages {
         let account = match usage.provider.as_str() {
+            "claude" if usage.account_id == boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A => {
+                AccountKind::ClaudeApi
+            }
             "claude" => AccountKind::ClaudePlan,
             "codex" => {
                 if keyed.iter().any(|(key, id)| {
@@ -170,6 +176,7 @@ pub fn account_key_for_route(route: &ChosenRoute) -> Option<&'static str> {
     match route.account {
         AccountKind::CodexPlan => Some(boblm_tuning::CODEX_ACCOUNT_KEY_PLAN),
         AccountKind::OpenAiApi => Some(boblm_tuning::CODEX_ACCOUNT_KEY_API),
+        AccountKind::ClaudeApi => Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A),
         AccountKind::ClaudePlan | AccountKind::DeepSeek => None,
     }
 }
