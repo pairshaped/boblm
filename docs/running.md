@@ -47,6 +47,37 @@ An interrupted turn, unconfirmed input, a crash, or an explicit owner Stop keeps
 the queue held. A runner running older code must be replaced once before it can
 record a quiet shutdown.
 
+## Add a second Claude account
+
+Plan A keeps your existing Claude login. To add plan B with the default database
+location, run:
+
+```sh
+install -d -m 700 "$HOME/.local/share/boblm/claude-plan-b"
+CLAUDE_CONFIG_DIR="$HOME/.local/share/boblm/claude-plan-b" claude
+```
+
+Then enter `/login` in Claude Code and sign into the second plan account. Exit
+Claude Code after login. For a custom database location, use `claude-plan-b`
+beside that database. For a dev instance named `accounts`, the home is
+`$HOME/.local/share/boblm-dev/accounts/data/claude-plan-b`.
+
+Add `CLAUDE_ACCOUNT_KEY_PLAN_B` to `CLAUDE_PLAN_ACCOUNTS` in
+`crates/tuning/src/lib.rs`. Rebuild and restart the web server, then safely
+replace existing runners using the command above. Keep A in the list.
+BobLM chooses accounts automatically and drains the account whose weekly reset
+comes first. At 2% left, idle chats can hand off. A chat with a running background
+job waits until that job ends. You can still create an owner chat when every
+account is past the cutoff; BobLM uses the account whose reset comes first.
+With A alone, owner chats and explicit-model peers keep using A at any usage.
+Role spawns continue to enforce their allowance cutoff.
+
+API B needs no `/login`. Save its key at `["ANTHROPIC_API_KEY_B"]` in
+`~/.config/sops/user-secrets.yaml`, then add `CLAUDE_ACCOUNT_KEY_API_B` to
+`CLAUDE_API_ACCOUNTS` and rebuild. Haiku reviewers try A before B, skipping an
+account whose credit is exhausted. API keys reach children through their
+environment and are never written into the Claude config homes.
+
 ## Build from source
 
 Install browser dependencies and build the assets before compiling the server:

@@ -27,8 +27,9 @@ Implementers take a difficulty of `simple` or `hard`:
 
 1. Sol on the Codex plan allowance, medium or high.
 2. Sol on the Codex plan credits while the balance is positive, medium or high.
-3. Sonnet on the Claude plan while Claude's remaining weekly allowance is above
-   the days to reset times R, medium or high.
+3. Sonnet on a Claude plan, medium or high. With one enabled plan its remaining
+   weekly allowance must exceed days to reset times R and the 2% cutoff. With
+   multiple plans only the 2% cutoff applies (ADR 0047).
 4. DeepSeek V4.1 Flash 1017 through Pi, medium or high.
 
 Reviewers take no difficulty:
@@ -37,9 +38,11 @@ Reviewers take no difficulty:
 2. Haiku on the Claude Platform API credit, high.
 3. DeepSeek V4.1 Flash 1017 through Pi, high.
 
-Every Claude plan step stops taking new subagents once the account has
-CLAUDE_ACCOUNT_CUTOFF_PERCENT (2%) of its weekly allowance left. That last slice is kept
-for the chats already running on it; new work falls through to the next step.
+Every Claude plan step chooses independently among enabled accounts, draining
+the one whose weekly reset comes first until it has
+CLAUDE_ACCOUNT_CUTOFF_PERCENT (2%) left. Then it tries the next account. If none
+has room, the role falls through to its next model step. Existing chats can
+hand off at a safe idle point (ADR 0047).
 
 The grunt role is retired. Both spawn tools refuse new grunt requests with a plain
 sentence directing callers to an implementer or `spawn_peer` with an explicit
@@ -63,12 +66,13 @@ active quota or billing exhaustion mark is skipped until its reset. There are no
 BobLM spend budgets; provider limits remain the owner's controls. The generous
 per-round runaway backstop below catches subagents that keep going unchecked.
 
-The runner detects a provider quota or billing rejection in a role chat's Pi,
-Codex or Claude error envelope and marks that chat's routed step, after checking
-that the session's provider account matches the step. An
+The runner detects provider quota or billing rejections in provider error
+envelopes. Pi and Codex mark their routed step after checking that the chat's
+account matches. Claude marks the individual account, including for explicitly
+created chats. The Haiku step tries enabled API accounts in A, B order. An
 OpenAI API quota or billing mark lasts until the start of the next OPENAI_API_CREDIT_RESET_DAY (the 1st, the ChatGPT plan renewal date) UTC, or the month's
 last day when it is shorter. The Claude API account has $200 of monthly credit;
-quota or billing rejection marks Haiku exhausted until the next
+quota or billing rejection marks that API account exhausted until the next
 `ANTHROPIC_API_CREDIT_RESET_DAY` UTC. That tunable defaults to 1 until the actual
 renewal date is known. It uses exhaustion marks, without the Claude plan cutoff
 or Sonnet reserve. A step with no known reset, currently DeepSeek, is
@@ -162,15 +166,15 @@ key from the chosen route: the Codex plan steps use `codex-plan`, and the OpenAI
 API step uses `codex-api`. That home's provider reads the OpenAI key from the
 child environment, injected from SOPS per spawn (ADR 0023).
 
-`CLAUDE_ACCOUNT_KEY_API_A` names `claude-api-a`. `CLAUDE_ACCOUNT_HOMES` maps it to
-an isolated config directory relative to the instance data directory. The factory
-sets `CLAUDE_CONFIG_DIR` on that child and injects `ANTHROPIC_API_KEY` from the
-single SOPS key `ANTHROPIC_API_KEY_A` (ADR 0025). It removes inherited OAuth,
-auth-token and provider-override variables from API children. Subscription children
-never inherit an API key or auth-token override. The API home has no subscription
-login, and the API account identity is `claude-api-a`, separate from subscription
-usage. Missing credentials fail the spawn; they never select a subscription login.
-
+`CLAUDE_ACCOUNT_KEY_PLAN_A/B` name the subscription accounts and
+`CLAUDE_ACCOUNT_KEY_API_A/B` name the API accounts. `CLAUDE_ACCOUNT_HOMES` maps
+them to their config homes. The factory injects `ANTHROPIC_API_KEY` from the
+selected account's SOPS key, `ANTHROPIC_API_KEY_A` or `ANTHROPIC_API_KEY_B`
+(ADR 0025). It removes inherited OAuth, auth-token and provider-override variables
+from API children. Plan children never inherit an API key or auth-token
+override. API homes have no subscription login and use their own account key
+as their usage identity. Missing credentials fail the spawn. See ADR 0047 for
+per-account usage, independent selection and idle transcript handoff.
 
 A subagent session records `parent_session_id`, `root_session_id` and `role` in
 the same spawn transaction as the child and its first input. A plain root has all

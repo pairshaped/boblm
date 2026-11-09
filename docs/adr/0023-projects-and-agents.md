@@ -37,6 +37,17 @@ the reasoning effort that model supports. Every new chat defaults to Opus at hig
 effort (`DEFAULT_MODEL` and `DEFAULT_EFFORT`), including browsers with an earlier
 remembered choice. Existing chats keep their stored model and effort.
 
+## Claude accounts
+
+Every new Claude chat stores its selected plan account key. A legacy null key
+means `claude-plan-a`, the existing login. `claude-plan-b` and both API accounts
+have isolated homes from `CLAUDE_ACCOUNT_HOMES`. New chats and subagents choose
+their own enabled account using that account's usage; they never inherit the
+parent's account. The runner sets the selected config home, preserves
+`BOBLM_SESSION_ID`, and strips inherited API authentication from plan children.
+API children receive only their own SOPS key. Account choice and idle transcript
+handoff are specified in ADR 0047.
+
 ## Codex
 
 Each Codex chat runs its own `codex app-server` process group and speaks JSON-RPC over stdio
