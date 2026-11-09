@@ -621,7 +621,7 @@ impl Peers {
         )
     }
     #[tool(
-        description = "Send a message to a session by full ID or unique prefix. Starts an idle peer or steers an active peer at the next tool boundary. A parent may reopen its own archived subagent by pinging it; other archived chats must be reopened by the owner. Supply a fresh messageId UUID and reuse it only for an identical explicit retry. Acceptance is not proof of Claude consumption."
+        description = "Send a message to a session by full ID or unique prefix. Starts an idle peer or steers an active peer at the next tool boundary. A parent may reopen its own archived subagent by pinging it; other archived chats must be reopened by the owner. Supply a fresh messageId UUID and reuse it only for an identical explicit retry. Acceptance is not proof of Claude consumption. Each message makes the receiver reread its whole context, so send one only for new work, a blocker, a decision or a result; batch what you have, and never acknowledge an acknowledgment or send progress updates."
     )]
     async fn ping_peer(
         &self,
@@ -642,7 +642,7 @@ impl Peers {
         }.await)
     }
     #[tool(
-        description = "Reply to the session that sent THIS chat its most recent peer message. BobLM resolves the target from the bound caller, so no session ID is needed. Supply a fresh messageId UUID and reuse it only for an identical explicit retry. Refuses when this chat has never received a peer message; use ping_peer for explicit addressing. Acceptance is not proof of consumption."
+        description = "Reply to the session that sent THIS chat its most recent peer message. BobLM resolves the target from the bound caller, so no session ID is needed. Supply a fresh messageId UUID and reuse it only for an identical explicit retry. Refuses when this chat has never received a peer message; use ping_peer for explicit addressing. Acceptance is not proof of consumption. Each message makes the receiver reread its whole context, so send one only for new work, a blocker, a decision or a result; batch what you have, and never acknowledge an acknowledgment or send progress updates."
     )]
     async fn reply_to_sender(
         &self,
@@ -662,7 +662,7 @@ impl Peers {
         }.await)
     }
     #[tool(
-        description = "Send a mid-task question to THIS subagent's parent. BobLM resolves the parent from the bound caller. Final results reach the parent automatically when the subagent finishes, so use this only for questions you need answered before continuing; use ask for owner decisions. Root chats are refused. Supply a fresh messageId UUID and reuse it only for an identical explicit retry."
+        description = "Send a mid-task question to THIS subagent's parent. BobLM resolves the parent from the bound caller. Final results reach the parent automatically when the subagent finishes, so use this only for blockers and questions you need answered before continuing, never for progress updates or acknowledgments; use ask for owner decisions. Root chats are refused. Supply a fresh messageId UUID and reuse it only for an identical explicit retry."
     )]
     async fn message_parent(
         &self,
