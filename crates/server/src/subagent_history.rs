@@ -44,10 +44,15 @@ pub(crate) async fn history(
                 .unwrap_or_else(|| home.join(".codex"))
                 .join("sessions")
         } else {
-            std::env::var_os("CLAUDE_CONFIG_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".claude"))
-                .join("projects")
+            crate::claude_account::home(
+                store.path().parent().unwrap_or(Path::new(".")),
+                session
+                    .account_key
+                    .as_deref()
+                    .unwrap_or(boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A),
+            )
+            .map_err(ApiError::internal)?
+            .join("projects")
         };
         load(&root, &session, &request)
     })

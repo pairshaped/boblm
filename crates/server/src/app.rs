@@ -779,7 +779,10 @@ async fn create_session(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<
                 project.path
             )));
         }
-        store.create_session_in(boblm_store::NewSession {
+        let account_key = if agent.as_str() == "claude" {
+            Some(crate::claude_account::choose_plan(&store, crate::schedule::now_ms() / 1000).map_err(ApiError::invalid)?)
+        } else { None };
+        store.create_session_on_account(boblm_store::NewSession {
             name: &request.name,
             id: &id,
             project_id: &project_id,
@@ -787,7 +790,7 @@ async fn create_session(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<
             model: &request.model,
             effort: request.effort.as_deref(),
             created_at: crate::schedule::now_ms(),
-        })?;
+        }, account_key)?;
         store
             .reader()?
             .sessions()?

@@ -309,6 +309,22 @@ pub fn is_api_tpm_rate_limit(text: &str) -> bool {
     text.contains("rate limit") && text.contains("tokens per min") && text.contains("(tpm)")
 }
 
+/// Claude plan limits, as reported in provider error envelopes. Ordinary rate limiting
+/// and assistant prose must never reach this classifier as a provider failure.
+pub fn is_claude_usage_limit(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    [
+        "you've hit your limit",
+        "you have hit your limit",
+        "usage limit",
+        "weekly limit",
+        "weekly allowance",
+        "rate_limit_error",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+}
+
 /// A step a provider quota or billing rejection marked exhausted until this Unix second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExhaustedStep {
@@ -418,6 +434,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChosenRoute {
+    pub account_key: Option<&'static str>,
     pub role: Role,
     pub difficulty: Difficulty,
     pub step: StepId,
@@ -548,6 +565,7 @@ fn resolve_with(
                     .collect::<Vec<_>>()
                     .join(" ");
                 return RouteOutcome::Chosen(ChosenRoute {
+                    account_key: None,
                     role,
                     difficulty,
                     step: step.id,
@@ -582,7 +600,7 @@ fn claude_reason(reading: Option<&AccountReading>, now: i64) -> Result<String, S
         .weekly_resets_at
         .map(|reset| (reset - now) as f64 / 86_400.0)
         .unwrap_or(0.0);
-    let reserved = (days * ROLE_R_POINTS_PER_DAY).max(CLAUDE_ACCOUNT_CUTOFF_PERCENT);
+    let reserved = claude_reserve(days, crate::CLAUDE_PLAN_ACCOUNTS.len());
     if remaining > reserved {
         Ok(format!(
             "Claude has {remaining:.1} points left, above the {reserved:.1} points reserved for the next {days:.1} days."
@@ -591,6 +609,15 @@ fn claude_reason(reading: Option<&AccountReading>, now: i64) -> Result<String, S
         Err(format!(
             "Claude has {remaining:.1} points left, which is not above the {reserved:.1} points reserved for the next {days:.1} days."
         ))
+    }
+}
+
+/// One plan keeps the planner reserve; multiple plans drain to the account cutoff.
+fn claude_reserve(days: f64, enabled: usize) -> f64 {
+    if enabled > 1 {
+        CLAUDE_ACCOUNT_CUTOFF_PERCENT
+    } else {
+        (days * ROLE_R_POINTS_PER_DAY).max(CLAUDE_ACCOUNT_CUTOFF_PERCENT)
     }
 }
 
@@ -1294,5 +1321,31 @@ mod tests {
             openai_api_reset_at(year_end),
             days_from_civil(2027, 1, 1) * 86_400
         );
+    }
+}
+
+#[cfg(test)]
+mod claude_reserve_tests {
+    use super::*;
+    #[test]
+    fn claude_implementer_reserve_stays_for_one_plan_and_drops_for_two() {
+        assert_eq!(
+            claude_reserve(5.0, 1),
+            (5.0 * ROLE_R_POINTS_PER_DAY).max(CLAUDE_ACCOUNT_CUTOFF_PERCENT)
+        );
+        assert_eq!(claude_reserve(5.0, 2), CLAUDE_ACCOUNT_CUTOFF_PERCENT);
+        assert_eq!(claude_reserve(0.1, 1), CLAUDE_ACCOUNT_CUTOFF_PERCENT);
+        assert!(is_claude_usage_limit(
+            "Claude reported an error: You've hit your limit. Resets Nov 10."
+        ));
+        assert!(!is_claude_usage_limit(
+            "Claude reported an error: server overloaded"
+        ));
+        assert!(!is_claude_usage_limit(
+            "Claude reported an error: context limit reached"
+        ));
+        assert!(!is_claude_usage_limit(
+            "Claude reported an error: rate limit reached for requests"
+        ));
     }
 }

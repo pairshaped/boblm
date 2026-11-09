@@ -844,7 +844,18 @@ impl Peers {
             }).map_err(|e|e.to_string())?;
             let content=crate::role_spawn::with_reply_trailer(&format!("Task from boblm session {caller}:\n\n{}",args.message), crate::role_spawn::ReplyTrailer::Peer);
             let created_at=unix_ms();
-            let (session,created)=self.app.spawn_peer(boblm_store::PeerSpawn{request_id:args.request_id.clone(),caller,arguments,project_id:project.id.clone(),agent:agent.as_str().into(),model:model.to_owned(),effort:effort.to_owned(),title:args.title,content,created_at,parent_session_id:None,root_session_id:None,role:None,resolved:None,working_directory:None,account_key:None}).await?;
+            let account_key = if agent.as_str() == "claude" {
+                let store = self.app.store.clone();
+                let id = args.request_id.clone();
+                tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+                    let reader = store.reader().map_err(|error| error.to_string())?;
+                    if reader.peer_spawn_receipt(&id).map_err(|error| error.to_string())?.is_some() {
+                        return Ok(reader.sessions().map_err(|error| error.to_string())?.into_iter().find(|session| session.id == id).and_then(|session| session.account_key));
+                    }
+                    crate::claude_account::choose_plan(&store, created_at / 1000).map(|key| Some(key.into()))
+                }).await.map_err(|error| format!("Could not choose a Claude account: {error}. Try again after storage is available."))??
+            } else { None };
+            let (session,created)=self.app.spawn_peer(boblm_store::PeerSpawn{request_id:args.request_id.clone(),caller,arguments,project_id:project.id.clone(),agent:agent.as_str().into(),model:model.to_owned(),effort:effort.to_owned(),title:args.title,content,created_at,parent_session_id:None,root_session_id:None,role:None,resolved:None,working_directory:None,account_key}).await?;
             let dispatch_failed=session.status.queue_held && session.status.queued>0 && !session.status.running;
             Ok(serde_json::json!({"sessionId":args.request_id,"messageId":args.request_id,"accepted":true,"alreadyAccepted":!created,"dispatchFailed":dispatch_failed,"session":session}))
         }.await)
@@ -1337,15 +1348,64 @@ impl AgentFactory {
 }
 #[async_trait::async_trait]
 impl boblm_runner::DriverFactory for AgentFactory {
+    async fn claude_handoff_target(
+        &self,
+        store: &boblm_store::Store,
+        session: &boblm_store::Session,
+    ) -> std::io::Result<Option<boblm_runner::ClaudeHandoff>> {
+        if boblm_tuning::CLAUDE_PLAN_ACCOUNTS.len() < 2 {
+            return Ok(None);
+        }
+        let store = store.clone();
+        let session = session.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::claude_account::handoff_target(
+                &store,
+                &session,
+                boblm_tuning::CLAUDE_PLAN_ACCOUNTS,
+                unix_ms() / 1000,
+            )
+        })
+        .await
+        .map_err(std::io::Error::other)?
+        .map_err(std::io::Error::other)
+    }
+    async fn copy_claude_transcript(
+        &self,
+        session: &boblm_store::Session,
+        target: &str,
+    ) -> std::io::Result<()> {
+        let Some(conversation) = session.agent_session_id.clone() else {
+            return Ok(());
+        };
+        let data = self.uploads_dir.parent().ok_or_else(|| {
+            std::io::Error::other(
+                "Claude has no data directory. Check the database path before resuming.",
+            )
+        })?;
+        let source = crate::claude_account::home(
+            data,
+            session
+                .account_key
+                .as_deref()
+                .unwrap_or(boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A),
+        )?;
+        let target = crate::claude_account::home(data, target)?;
+        tokio::task::spawn_blocking(move || {
+            crate::claude_account::copy_transcript(&source, &target, &conversation)
+        })
+        .await
+        .map_err(std::io::Error::other)?
+    }
     fn account_id(&self, session: &boblm_store::Session) -> Option<String> {
         match session.agent.as_str() {
-            "claude" => match session.account_key.as_deref() {
-                Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A) => {
-                    Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A.into())
-                }
-                Some(_) => None,
-                None => boblm_claude_driver::account::account_id(),
-            },
+            "claude" => crate::claude_account::account_id(
+                self.uploads_dir.parent()?,
+                session
+                    .account_key
+                    .as_deref()
+                    .unwrap_or(boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A),
+            ),
             "codex" => match session.account_key.as_deref() {
                 Some(key) => boblm_codex_driver::account::account_id_for_key(key),
                 None => boblm_codex_driver::account::account_id(),
@@ -1431,16 +1491,18 @@ impl boblm_runner::DriverFactory for AgentFactory {
         // Attachments live outside the working directory; name them for the agent.
         let mut command = tokio::process::Command::new(boblm_tuning::CLAUDE_BINARY);
         command.env(boblm_tuning::SESSION_ID_ENV, &session.id);
-        let api_key =
-            if session.account_key.as_deref() == Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A) {
-                Some(
-                    crate::claude_account::api_key()
-                        .await
-                        .map_err(std::io::Error::other)?,
-                )
-            } else {
-                None
-            };
+        let api_key = match session
+            .account_key
+            .as_deref()
+            .filter(|key| crate::claude_account::is_api(key))
+        {
+            Some(key) => Some(
+                crate::claude_account::api_key(key)
+                    .await
+                    .map_err(std::io::Error::other)?,
+            ),
+            None => None,
+        };
         let data_dir = self.uploads_dir.parent().ok_or_else(|| std::io::Error::other(
             "Claude has no persistent data directory. Check the BobLM database path before reopening the chat."
         ))?;

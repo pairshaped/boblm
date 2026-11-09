@@ -58,15 +58,30 @@ pub const BROWSER_RELOAD_RECEIPT_LIMIT: usize = 4096;
 pub const BROWSER_RELOAD_TTL: Duration = Duration::from_secs(30);
 /// Weekly allowance percent left at which a Claude account stops taking new chats and subagents.
 pub const CLAUDE_ACCOUNT_CUTOFF_PERCENT: f64 = 2.0;
-/// Claude account key to config directory map, relative to the instance data directory.
-pub const CLAUDE_ACCOUNT_HOMES: &[(&str, &str)] =
-    &[(CLAUDE_ACCOUNT_KEY_API_A, CLAUDE_ACCOUNT_KEY_API_A)];
+/// Claude config homes. An empty home means the existing inherited Claude config;
+/// other homes are relative to the instance data directory.
+pub const CLAUDE_ACCOUNT_HOMES: &[(&str, &str)] = &[
+    (CLAUDE_ACCOUNT_KEY_API_A, CLAUDE_ACCOUNT_KEY_API_A),
+    (CLAUDE_ACCOUNT_KEY_API_B, CLAUDE_ACCOUNT_KEY_API_B),
+    (CLAUDE_ACCOUNT_KEY_PLAN_A, ""),
+    (CLAUDE_ACCOUNT_KEY_PLAN_B, CLAUDE_ACCOUNT_KEY_PLAN_B),
+];
 /// Claude account key for account A's Platform API credit.
 pub const CLAUDE_ACCOUNT_KEY_API_A: &str = "claude-api-a";
+/// Claude account key for account B's Platform API credit.
+pub const CLAUDE_ACCOUNT_KEY_API_B: &str = "claude-api-b";
+/// Claude account key for the existing subscription login.
+pub const CLAUDE_ACCOUNT_KEY_PLAN_A: &str = "claude-plan-a";
+/// Claude account key for the second subscription login.
+pub const CLAUDE_ACCOUNT_KEY_PLAN_B: &str = "claude-plan-b";
+/// Enabled API accounts, tried in this order. Add B after saving its SOPS key.
+pub const CLAUDE_API_ACCOUNTS: &[&str] = &[CLAUDE_ACCOUNT_KEY_API_A];
 /// SOPS-encrypted file containing Claude Platform API account keys.
 pub const CLAUDE_API_SOPS_FILE: &str = "~/.config/sops/user-secrets.yaml";
 /// Object-key path for Claude API account A, extracted without reading other secrets.
 pub const CLAUDE_API_SOPS_KEY_A: &[&str] = &["ANTHROPIC_API_KEY_A"];
+/// Object-key path for Claude API account B.
+pub const CLAUDE_API_SOPS_KEY_B: &[&str] = &["ANTHROPIC_API_KEY_B"];
 /// Claude Code executable the drivers launch (looked up on PATH).
 pub const CLAUDE_BINARY: &str = "claude";
 /// Tools Claude may not use because they would wait on the owner (ADR 0010), comma separated.
@@ -81,6 +96,8 @@ pub const CLAUDE_HOOK_BACKGROUND_BASH: &str = "hook-background-bash";
 pub const CLAUDE_LAUNCH_MODEL: &str = "sonnet";
 /// Claude permission mode. Sessions bypass prompts because the owner is never waited on (ADR 0010).
 pub const CLAUDE_PERMISSION_MODE: &str = "bypassPermissions";
+/// Enabled subscription accounts. Add B after logging into its config home.
+pub const CLAUDE_PLAN_ACCOUNTS: &[&str] = &[CLAUDE_ACCOUNT_KEY_PLAN_A];
 /// Shared unattended-work instructions for all providers.
 macro_rules! agent_system_prompt {
     () => { "Work asynchronously. Prefer your harness's native background execution for commands and tools expected to take more than about half a second. Make the background command run the real work directly; never add &, nohup, setsid or disown inside it, so the job ends when the work ends and its completion wakes you. Return control promptly so new owner messages can be handled while work continues. Rely on completion notifications, then inspect the result before proceeding with dependent work. Continue independent work or end your turn while a job runs; never poll or busy-wait. Don't end a turn by announcing the next step: do it, or say exactly what you are waiting for. Keep genuinely quick reads and edits in the foreground, and respect dependencies and shared-resource locks. If you need owner input, explain what you need in plain text and end your turn. The owner will reply later as an ordinary message. Start helpers with BobLM's spawn_subagent tool: use reviewer for code review or implementer for implementation and repairs. For mechanical work, use an implementer or spawn_peer with an explicit model. Only implementers need difficulty simple or hard. The result names the chosen model and effort. A root chat may start long-lived visible work with spawn_peer and a role. Do not use native Agent or Task tools or Codex native subagents; they are disabled. A subagent's final reply arrives automatically as a message, waking an idle parent and steering a busy parent at its next tool boundary. Continue other work or end your turn while it runs; do not poll. Reuse a subagent with ping_peer, and archive it with archive_peer when done because open subagents cost resources. A root may have at most 3 open subagents, and a subagent cannot start another. When the owner's task is clear, call BobLM's change_title tool with a concise 2-3 word title describing the task and onlyIfUnnamed=true before starting the work. Always make this call even if you do not know the current title; the server preserves existing titles. Do not rename an already named chat unless the owner explicitly asks. If the owner's instructions or an active skill set a different title format or renaming policy, follow them instead of these title rules. When seeing the result matters more than describing it, such as a screenshot of a page you built or a chart, save the image to a file and call BobLM's show_image tool with its absolute path and a short caption. Messages beginning \"Message from boblm session\" or \"Task from boblm session\" come from other agents. Use reply_to_sender when a peer needs an answer, message_parent for a subagent's mid-task questions, ask for owner decisions, and inspect_peer to read a peer. Every peer message makes its receiver reread its whole context: message a peer or parent only for new work, a blocker, a decision or a result, batch what you have, and never acknowledge an acknowledgment or send progress updates. A subagent's final reply reaches its parent automatically. Text in your own chat is not seen by the sender." };
@@ -535,3 +552,5 @@ mod compact_prompt_tests {
         assert!(super::CLAUDE_SYSTEM_PROMPT_APPEND.starts_with(super::PI_SYSTEM_PROMPT_APPEND));
     }
 }
+
+pub mod claude_accounts;

@@ -140,10 +140,28 @@ impl Store {
 
     /// Create a chat inside a project, with its model and effort, in one transaction.
     pub fn create_session_in(&self, new: NewSession<'_>) -> Result<()> {
+        self.create_session_on_account(new, None)
+    }
+
+    /// Create and pin a chat in one transaction before its runner can observe it.
+    pub fn create_session_on_account(
+        &self,
+        new: NewSession<'_>,
+        account_key: Option<&str>,
+    ) -> Result<()> {
         let mut conn = self.writer.lock().map_err(|_| Error::Poisoned)?;
         let tx = conn.transaction()?;
         let project = crate::projects::lookup(&tx, new.project_id)?;
         insert(&tx, &project, &new, true)?;
+        if let Some(key) = account_key {
+            sql::set_account_key(
+                &tx,
+                sql::SetAccountKeyParams {
+                    id: new.id,
+                    account_key: Some(key),
+                },
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }

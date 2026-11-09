@@ -37,6 +37,8 @@ pub trait Driver: Send + Sync {
     async fn shutdown(&mut self) -> io::Result<()>;
 }
 
+pub use boblm_store::ClaudeHandoff;
+
 #[async_trait]
 pub trait DriverFactory: Send + Sync {
     fn external_runners(&self) -> bool {
@@ -49,6 +51,16 @@ pub trait DriverFactory: Send + Sync {
         _session: &str,
     ) -> crate::Result<Option<crate::RunningSession>> {
         Ok(None)
+    }
+    async fn claude_handoff_target(
+        &self,
+        _store: &boblm_store::Store,
+        _session: &Session,
+    ) -> io::Result<Option<ClaudeHandoff>> {
+        Ok(None)
+    }
+    async fn copy_claude_transcript(&self, _session: &Session, _target: &str) -> io::Result<()> {
+        Ok(())
     }
     async fn spawn(&self, session: &Session) -> io::Result<Box<dyn Driver>>;
     /// Read the provider account this child will run on, when its local files expose one.

@@ -4,7 +4,9 @@ pub mod events;
 pub mod transport;
 use boblm_protocol::{Event, LifecycleState, Priority};
 use boblm_store::{NewMessage, RangeRow, Session, Store, StoredEvent};
-pub use driver::{ClaudeDriver, ClaudeFactory, CodexDriver, Driver, DriverFactory, PiDriver};
+pub use driver::{
+    ClaudeDriver, ClaudeFactory, ClaudeHandoff, CodexDriver, Driver, DriverFactory, PiDriver,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -663,6 +665,8 @@ impl Actor {
         self.pump().await?;
         self.publish_status().await?;
         let mut clean_shutdown = false;
+        let mut account_check = tokio::time::interval(boblm_tuning::USAGE_POLL_INTERVAL);
+        account_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             let pause_tool_boundary = !self.outstanding_tools.is_empty();
             let deadline = self
@@ -683,9 +687,11 @@ impl Actor {
                 Event(Option<Event>),
                 Deadline,
                 Expiry,
+                Accounts,
             }
             let expiry = self.expiry_deadline();
             let wake = tokio::select! {
+                _ = account_check.tick() => Wake::Accounts,
                 command = commands.recv() => Wake::Command(command),
                 event = async { match &mut self.driver { Some(driver) => driver.next_event().await, None => std::future::pending().await } } => Wake::Event(event),
                 _ = async { match deadline { Some(deadline) => tokio::time::sleep_until(deadline).await, None => std::future::pending().await } } => Wake::Deadline,
@@ -719,6 +725,7 @@ impl Actor {
                     self.consume_event_batch(event).await?;
                 }
                 Wake::Expiry => self.expire_stale().await?,
+                Wake::Accounts => {}
                 Wake::Deadline => {
                     if self.stop_deadline.is_some() {
                         eprintln!(
@@ -1152,6 +1159,96 @@ impl Actor {
         });
         self.refresh().await
     }
+    async fn mark_claude_exhaustion(&self) -> Result<()> {
+        let session = self.session().await?;
+        if session.agent != "claude" {
+            return Ok(());
+        }
+        let key = session
+            .account_key
+            .unwrap_or_else(|| boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A.into());
+        let plan = matches!(
+            key.as_str(),
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A | boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B
+        );
+        let now = now() / 1000;
+        let id = self.id.clone();
+        self.db(move |store| {
+            let reset = store
+                .reader()?
+                .account_usage_for_session(&id)?
+                .and_then(|usage| usage.weekly)
+                .and_then(|weekly| weekly.resets_at)
+                .filter(|reset| *reset > now);
+            let until = if plan {
+                reset.unwrap_or_else(|| {
+                    now.saturating_add(
+                        i64::try_from(boblm_tuning::WEEKLY_USAGE_WINDOW_MINUTES * 60)
+                            .unwrap_or(i64::MAX),
+                    )
+                })
+            } else {
+                boblm_tuning::claude_api_reset_at(now)
+            };
+            store.exhaust_claude_account(&id, &key, until, plan)
+        })
+        .await
+    }
+
+    async fn maybe_handoff_claude(&mut self) -> Result<()> {
+        if self.active
+            || self.compacting
+            || !self.pending.is_empty()
+            || self.stop_deadline.is_some()
+            || !self.outstanding_tools.is_empty()
+            || self.stopped
+            || self
+                .messages
+                .values()
+                .any(|message| message.delivery_state == "dispatching")
+            || !self.jobs.as_ref().map_or(self.driver.is_none(), |jobs| {
+                jobs.available && jobs.tasks.is_empty()
+            })
+        {
+            return Ok(());
+        }
+        let session = self.session().await?;
+        if session.agent != "claude" {
+            return Ok(());
+        }
+        let Some(change) = self
+            .factory
+            .claude_handoff_target(&self.store, &session)
+            .await?
+        else {
+            return Ok(());
+        };
+        // The provider was drained at this actor boundary. No turn, write, or job can
+        // start concurrently while the serialized actor stops and copies its transcript.
+        if let Some(mut driver) = self.driver.take()
+            && let Err(error) = driver.shutdown().await
+        {
+            self.held = true;
+            self.record("driver_error", serde_json::json!({"message":format!("Claude could not stop for an account handoff: {error}. Check the child process before resuming this chat.")})).await?;
+            return Ok(());
+        }
+        self.jobs = None;
+        self.applied_choice = None;
+        if let Err(error) = self
+            .factory
+            .copy_claude_transcript(&session, &change.target)
+            .await
+        {
+            self.held = true;
+            self.record("driver_error", serde_json::json!({"message":format!("Claude could not copy this conversation to its next account: {error}. Fix the transcript files, then resume this chat to retry.")})).await?;
+            return Ok(());
+        }
+        let id = self.id.clone();
+        self.db(move |store| store.handoff_claude_account(&id, &change, now()))
+            .await?;
+        self.refresh().await
+    }
+
     async fn mark_provider_exhaustion(&self, tpm: bool) -> Result<()> {
         let session = self.session().await?;
         let id = self.id.clone();
@@ -1170,11 +1267,8 @@ impl Actor {
                 session.agent == "codex"
                     && session.account_key.as_deref() == Some(boblm_tuning::CODEX_ACCOUNT_KEY_API)
             }
-            boblm_tuning::AccountKind::ClaudeApi => {
-                session.agent == "claude"
-                    && session.account_key.as_deref()
-                        == Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A)
-            }
+            // Claude marks are per account, not per role step.
+            boblm_tuning::AccountKind::ClaudeApi => false,
             boblm_tuning::AccountKind::DeepSeek => session.agent == "pi",
             _ => false,
         };
@@ -1262,6 +1356,10 @@ impl Actor {
                 || self.stop_deadline.is_some()
                 || self.session().await?.archived
             {
+                break;
+            }
+            self.maybe_handoff_claude().await?;
+            if self.held {
                 break;
             }
             let idle = !self.active && self.pending.is_empty();
@@ -1512,7 +1610,21 @@ impl Actor {
         if let Event::Assistant { message } = &event
             && let Some(text) = driver_error_text(message)
         {
-            self.provider_rejection |= boblm_tuning::is_provider_exhaustion(&text);
+            let exhausted = boblm_tuning::is_provider_exhaustion(&text);
+            let session = self.session().await?;
+            let plan = matches!(
+                session
+                    .account_key
+                    .as_deref()
+                    .unwrap_or(boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A),
+                boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A | boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B
+            );
+            let claude_limit = session.agent == "claude"
+                && (exhausted || (plan && boblm_tuning::is_claude_usage_limit(&text)));
+            self.provider_rejection |= exhausted || claude_limit;
+            if claude_limit {
+                self.mark_claude_exhaustion().await?;
+            }
             if boblm_tuning::is_api_tpm_rate_limit(&text) {
                 // Record cooldown immediately, even if Codex is about to retry.
                 self.mark_provider_exhaustion(true).await?;
@@ -1711,9 +1823,14 @@ impl Actor {
                 if is_error == Some(true) && self.provider_rejection {
                     self.mark_provider_exhaustion(false).await?;
                 }
-                self.provider_rejection = false;
+                let rejected = std::mem::take(&mut self.provider_rejection);
                 let succeeded =
                     is_error != Some(true) && subtype.as_deref() != Some("context_overflow");
+                if succeeded && !rejected && self.session().await?.agent == "claude" {
+                    let id = self.id.clone();
+                    self.db(move |store| store.clear_claude_account_continuation(&id))
+                        .await?;
+                }
                 // A self-compaction can be queued during the turn producing this result.
                 // Retain it until a result follows dispatch of the automated command itself.
                 let auto_dispatched = self.auto_task.as_ref().is_some_and(|task| task.dispatched);

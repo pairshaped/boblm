@@ -2,6 +2,8 @@
 mod account_usage;
 mod api_headroom;
 mod attachments;
+mod claude_accounts;
+pub use claude_accounts::ClaudeHandoff;
 mod deletions;
 mod events;
 mod history;

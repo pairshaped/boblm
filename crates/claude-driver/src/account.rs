@@ -11,7 +11,7 @@ pub fn account_id() -> Option<String> {
     account_id_in(&path)
 }
 
-fn account_id_in(path: &Path) -> Option<String> {
+pub fn account_id_in(path: &Path) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     value["oauthAccount"]["accountUuid"]

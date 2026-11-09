@@ -1156,7 +1156,13 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
         .create_session("caller", temp.path().to_str().unwrap(), 1)
         .unwrap();
     store
-        .set_session_account("caller", Some("claude-account"))
+        .set_session_account(
+            "caller",
+            Some(
+                &boblm_claude_driver::account::account_id()
+                    .unwrap_or_else(|| "claude-account".into()),
+            ),
+        )
         .unwrap();
     let (inputs, _received) = tokio::sync::mpsc::unbounded_channel();
     let factory = Arc::new(SpawnFactory { inputs });
@@ -2257,7 +2263,13 @@ async fn planner_spawn_routes_to_opus_without_difficulty() {
         .create_session("caller", temp.path().to_str().unwrap(), 1)
         .unwrap();
     store
-        .set_session_account("caller", Some("claude-account"))
+        .set_session_account(
+            "caller",
+            Some(
+                &boblm_claude_driver::account::account_id()
+                    .unwrap_or_else(|| "claude-account".into()),
+            ),
+        )
         .unwrap();
     let (inputs, _received) = tokio::sync::mpsc::unbounded_channel();
     let app = App::open(
@@ -2279,7 +2291,7 @@ async fn planner_spawn_routes_to_opus_without_difficulty() {
         let spawned = tool_value(&result);
         assert_eq!(spawned["routing"]["model"], boblm_tuning::MODEL_OPUS);
         assert_eq!(spawned["routing"]["effort"], "high");
-        assert_eq!(spawned["routing"]["account"], "claude-plan");
+        assert_eq!(spawned["routing"]["account"], "claude-plan-a");
         assert_eq!(spawned["routing"]["step"], "planner-claude");
         assert_eq!(spawned["session"]["role"], "planner");
     }
@@ -2550,9 +2562,11 @@ async fn retired_grunt_sessions_and_receipts_still_load_and_display() {
 fn claude_api_usage_never_becomes_a_subscription_reading_without_a_keyed_chat() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("api-usage.sqlite")).unwrap();
+    let plan_id =
+        boblm_claude_driver::account::account_id().unwrap_or_else(|| "subscription".into());
     for (id, account, used) in [
         ("old-api", boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A, 0.0),
-        ("plan", "subscription", 100.0),
+        ("plan", plan_id.as_str(), 100.0),
     ] {
         store.create_session(id, "/fake", 1).unwrap();
         store.set_session_account(id, Some(account)).unwrap();
@@ -2567,4 +2581,88 @@ fn claude_api_usage_never_becomes_a_subscription_reading_without_a_keyed_chat() 
         outcome.is_err(),
         "API usage cannot make the exhausted Claude plan available"
     );
+}
+
+#[tokio::test]
+async fn claude_spawns_choose_independently_of_a_parent_pinned_to_plan_b() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("independent.sqlite")).unwrap();
+    store
+        .create_session("caller", temp.path().to_str().unwrap(), 1)
+        .unwrap();
+    store
+        .set_claude_account_key("caller", boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B)
+        .unwrap();
+    let (inputs, _received) = tokio::sync::mpsc::unbounded_channel();
+    let app = App::open(
+        store.clone(),
+        Arc::new(SpawnFactory { inputs }),
+        "independent-test-token".into(),
+    )
+    .await
+    .unwrap();
+    app.set_role_subagents_enabled_for_tests(true);
+    let router = app.router(Some(temp.path().into()));
+    for (tool, id, extra) in [
+        (
+            "spawn_subagent",
+            "d774da14-d160-4594-8615-6955d632fa4a",
+            serde_json::json!({"role":"planner"}),
+        ),
+        (
+            "spawn_peer",
+            "ab0e38e9-c299-4eab-b8b3-e3d5fc767368",
+            serde_json::json!({"model":boblm_tuning::MODEL_SONNET,"effort":"high"}),
+        ),
+    ] {
+        let mut args = serde_json::json!({"title":"Independent account", "requestId":id,"message":"Test account selection"});
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let result = call(&router, "independent-test-token", "caller", tool, args).await;
+        assert_eq!(result["result"]["isError"], false, "{result}");
+        let child = store
+            .reader()
+            .unwrap()
+            .sessions()
+            .unwrap()
+            .into_iter()
+            .find(|session| session.id == id)
+            .unwrap();
+        assert_eq!(
+            child.account_key.as_deref(),
+            Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A)
+        );
+    }
+    store
+        .exhaust_claude_account(
+            "caller",
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A,
+            4_000_000_000,
+            true,
+        )
+        .unwrap();
+    let retry = call(&router, "independent-test-token", "caller", "spawn_peer", serde_json::json!({
+        "title":"Independent account", "requestId":"ab0e38e9-c299-4eab-b8b3-e3d5fc767368", "message":"Test account selection", "model":boblm_tuning::MODEL_SONNET,"effort":"high"
+    })).await;
+    assert_eq!(
+        retry["result"]["isError"], false,
+        "Accepted spawns must survive account exhaustion: {retry}"
+    );
+    assert_eq!(tool_value(&retry)["alreadyAccepted"], true);
+    let fresh = call(&router, "independent-test-token", "caller", "spawn_peer", serde_json::json!({
+        "title":"Owner work at the cutoff", "requestId":"eb013c9a-2d76-4497-849f-557d74de0d29", "message":"Explicit work", "model":boblm_tuning::MODEL_SONNET,"effort":"high"
+    })).await;
+    assert_eq!(
+        fresh["result"]["isError"], false,
+        "Explicit Claude work stays available with one exhausted plan: {fresh}"
+    );
+    let role = call(&router, "independent-test-token", "caller", "spawn_subagent", serde_json::json!({
+        "title":"Planner at the cutoff", "requestId":"9ec659d7-4af4-4fae-8bf1-9781e310565e", "message":"Plan work", "role":"planner"
+    })).await;
+    assert_eq!(
+        role["result"]["isError"], true,
+        "Role spawns still enforce the cutoff: {role}"
+    );
+    app.shutdown().await.unwrap();
 }

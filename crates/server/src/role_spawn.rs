@@ -101,10 +101,7 @@ pub fn resolve_route(
     let mut readings = Vec::new();
     for usage in usages {
         let account = match usage.provider.as_str() {
-            "claude" if usage.account_id == boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A => {
-                AccountKind::ClaudeApi
-            }
-            "claude" => AccountKind::ClaudePlan,
+            "claude" => continue,
             "codex" => {
                 if keyed.iter().any(|(key, id)| {
                     *key == boblm_tuning::CODEX_ACCOUNT_KEY_PLAN && *id == usage.account_id
@@ -128,6 +125,30 @@ pub fn resolve_route(
         });
     }
     let now_ms = unix_millis();
+    let accounts = crate::claude_account::plan_accounts(store, boblm_tuning::CLAUDE_PLAN_ACCOUNTS)?;
+    let plan = boblm_tuning::claude_accounts::choose(&accounts, now_ms / 1000);
+    readings.push(AccountReading {
+        account: AccountKind::ClaudePlan,
+        weekly_used_percent: plan
+            .and_then(|account| account.used_percent)
+            .or_else(|| plan.is_none().then_some(100.0)),
+        weekly_resets_at: plan.and_then(|account| account.resets_at),
+        credits_balance: None,
+    });
+    let api = crate::claude_account::choose_api(store, now_ms / 1000)?;
+    let mut exhausted = exhausted;
+    // New quota failures mark individual Claude API accounts. Retain a legacy global
+    // mark for A until its original expiry, without blocking a newly enabled B.
+    if let Some(key) = api {
+        if key != boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A {
+            exhausted.retain(|mark| mark.step != StepId::ReviewerClaudeApi);
+        }
+    } else {
+        exhausted.push(boblm_tuning::ExhaustedStep {
+            step: StepId::ReviewerClaudeApi,
+            until: i64::MAX,
+        });
+    }
     let headroom = reader.api_reviewer_headroom(now_ms)
         .map_err(|error| format!("Could not measure API reviewer headroom: {error}. Try spawning again after storage is available."))?;
     match boblm_tuning::resolve(
@@ -138,7 +159,14 @@ pub fn resolve_route(
         headroom,
         now_ms / 1000,
     ) {
-        RouteOutcome::Chosen(route) => Ok(route),
+        RouteOutcome::Chosen(mut route) => {
+            route.account_key = match route.account {
+                AccountKind::ClaudePlan => plan.map(|account| account.key),
+                AccountKind::ClaudeApi => api,
+                _ => None,
+            };
+            Ok(route)
+        }
         RouteOutcome::Exhausted(rejections) => {
             let reasons = rejections
                 .iter()
@@ -146,18 +174,17 @@ pub fn resolve_route(
                 .collect::<Vec<_>>()
                 .join(" ");
             if role == Role::Planner {
-                let reset = readings
+                let reset = accounts
                     .iter()
-                    .find(|reading| reading.account == AccountKind::ClaudePlan)
-                    .and_then(|reading| reading.weekly_resets_at)
-                    .into_iter()
+                    .filter_map(|account| account.resets_at.or(account.exhausted_until))
+                    .filter(|reset| *reset > now_ms / 1000)
                     .chain(
                         exhausted
                             .iter()
                             .filter(|mark| mark.step == StepId::PlannerClaude)
                             .map(|mark| mark.until),
                     )
-                    .max();
+                    .min();
                 let reset = reset
                     .and_then(|time| chrono::DateTime::from_timestamp(time, 0))
                     .map(|time| time.format("%Y-%m-%d %H:%M:%S UTC").to_string())
@@ -176,8 +203,8 @@ pub fn account_key_for_route(route: &ChosenRoute) -> Option<&'static str> {
     match route.account {
         AccountKind::CodexPlan => Some(boblm_tuning::CODEX_ACCOUNT_KEY_PLAN),
         AccountKind::OpenAiApi => Some(boblm_tuning::CODEX_ACCOUNT_KEY_API),
-        AccountKind::ClaudeApi => Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A),
-        AccountKind::ClaudePlan | AccountKind::DeepSeek => None,
+        AccountKind::ClaudeApi | AccountKind::ClaudePlan => route.account_key,
+        AccountKind::DeepSeek => None,
     }
 }
 
@@ -188,7 +215,8 @@ pub fn route_json(route: &ChosenRoute) -> Value {
         "model": route.model,
         "modelLabel": boblm_tuning::model_display(route.model),
         "effort": route.effort,
-        "account": route.account.as_str(),
+        "account": route.account_key.unwrap_or(route.account.as_str()),
+        "accountKind": route.account.as_str(),
         "step": route.step.as_str(),
         "reason": route.reason,
     })

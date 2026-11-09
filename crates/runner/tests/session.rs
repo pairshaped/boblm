@@ -2974,7 +2974,7 @@ async fn openai_billing_rejection_marks_the_reviewer_step_until_the_monthly_rese
 }
 
 #[tokio::test]
-async fn claude_api_billing_rejection_marks_the_reviewer_step_until_the_monthly_reset() {
+async fn claude_api_billing_rejection_marks_only_its_account_until_the_monthly_reset() {
     let mut h = Harness::new_role(
         "claude",
         Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A),
@@ -2996,10 +2996,31 @@ async fn claude_api_billing_rejection_marks_the_reviewer_step_until_the_monthly_
             is_error: Some(true),
         })
         .unwrap();
-    let marks = role_marks(&h.store).await;
-    assert_eq!(marks.len(), 1);
-    assert_eq!(marks[0].step, boblm_tuning::StepId::ReviewerClaudeApi);
-    assert_eq!(marks[0].until, boblm_tuning::claude_api_reset_at(before));
+    wait_status(&runner.handle(), |status| {
+        !status.turn_active && status.dispatching == 0
+    })
+    .await;
+    let marks = h
+        .store
+        .reader()
+        .unwrap()
+        .claude_account_exhaustions()
+        .unwrap();
+    assert_eq!(
+        marks,
+        vec![(
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A.into(),
+            boblm_tuning::claude_api_reset_at(before)
+        )]
+    );
+    assert!(
+        h.store
+            .reader()
+            .unwrap()
+            .role_exhaustions()
+            .unwrap()
+            .is_empty()
+    );
     runner.shutdown().await.unwrap();
 }
 
