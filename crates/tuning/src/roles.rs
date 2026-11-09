@@ -238,7 +238,7 @@ pub const REVIEWER_STEPS: &[RoleStep] = &[
     },
 ];
 
-/// Planning uses the Claude allowance without the Sonnet reserve or a fallback.
+/// Planning uses the Claude allowance with no fallback.
 pub const PLANNER_STEPS: &[RoleStep] = &[RoleStep {
     id: StepId::PlannerClaude,
     model: MODEL_OPUS,
@@ -542,8 +542,7 @@ fn resolve_with(
             .iter()
             .find(|reading| reading.account == step.account);
         let reason = match step.id {
-            StepId::ImplementerClaude => claude_reason(reading, now),
-            StepId::ImplementerCodexPlan | StepId::PlannerClaude => {
+            StepId::ImplementerCodexPlan | StepId::ImplementerClaude | StepId::PlannerClaude => {
                 weekly_plan_reason(step.account, reading, now)
             }
             StepId::ImplementerCodexCredits => codex_credits_reason(reading),
@@ -583,42 +582,6 @@ fn resolve_with(
         }
     }
     RouteOutcome::Exhausted(rejections)
-}
-
-fn claude_reason(reading: Option<&AccountReading>, now: i64) -> Result<String, String> {
-    let Some(reading) = reading else {
-        return Ok("Claude has no reading, which counts as available.".into());
-    };
-    if reading.weekly_resets_at.is_some_and(|reset| reset <= now) {
-        return Ok("Claude's reading is past its reset, which counts as available.".into());
-    }
-    let Some(used) = reading.weekly_used_percent else {
-        return Ok("Claude has no weekly reading, which counts as available.".into());
-    };
-    let remaining = (100.0 - used).max(0.0);
-    let days = reading
-        .weekly_resets_at
-        .map(|reset| (reset - now) as f64 / 86_400.0)
-        .unwrap_or(0.0);
-    let reserved = claude_reserve(days, crate::CLAUDE_PLAN_ACCOUNTS.len());
-    if remaining > reserved {
-        Ok(format!(
-            "Claude has {remaining:.1} points left, above the {reserved:.1} points reserved for the next {days:.1} days."
-        ))
-    } else {
-        Err(format!(
-            "Claude has {remaining:.1} points left, which is not above the {reserved:.1} points reserved for the next {days:.1} days."
-        ))
-    }
-}
-
-/// One plan keeps the planner reserve; multiple plans drain to the account cutoff.
-fn claude_reserve(days: f64, enabled: usize) -> f64 {
-    if enabled > 1 {
-        CLAUDE_ACCOUNT_CUTOFF_PERCENT
-    } else {
-        (days * ROLE_R_POINTS_PER_DAY).max(CLAUDE_ACCOUNT_CUTOFF_PERCENT)
-    }
 }
 
 fn weekly_plan_reason(
@@ -912,141 +875,44 @@ mod tests {
     }
 
     #[test]
-    fn claude_boundary_uses_days_to_reset_and_r() {
+    fn sonnet_implementers_drain_claude_to_the_cutoff() {
         let now = 1_000_000;
-        let reset = now + 3 * 86_400;
         let configured = |step| {
             matches!(
                 step,
                 StepId::ImplementerClaude | StepId::ImplementerDeepSeek
             )
         };
-        let readings = [reading(
-            AccountKind::ClaudePlan,
-            Some(57.9),
-            Some(reset),
-            None,
-        )];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
-            Role::Implementer,
-            Difficulty::Simple,
-            &readings,
-            &[],
-            ApiHeadroom::default(),
-            now,
-            (
-                configured,
-                CODEX_PLAN_ROUTING_ENABLED,
-                OPENAI_API_ROUTING_ENABLED,
-            ),
-        ) else {
-            panic!()
-        };
-        assert_eq!(chosen.step, StepId::ImplementerClaude);
-
-        let readings = [reading(
-            AccountKind::ClaudePlan,
-            Some(58.0),
-            Some(reset),
-            None,
-        )];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
-            Role::Implementer,
-            Difficulty::Simple,
-            &readings,
-            &[],
-            ApiHeadroom::default(),
-            now,
-            (
-                configured,
-                CODEX_PLAN_ROUTING_ENABLED,
-                OPENAI_API_ROUTING_ENABLED,
-            ),
-        ) else {
-            panic!()
-        };
-        assert_eq!(chosen.step, StepId::ImplementerDeepSeek);
-
-        let readings = [reading(
-            AccountKind::ClaudePlan,
-            Some(100.0),
-            Some(now - 1),
-            None,
-        )];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
-            Role::Implementer,
-            Difficulty::Simple,
-            &readings,
-            &[],
-            ApiHeadroom::default(),
-            now,
-            (
-                configured,
-                CODEX_PLAN_ROUTING_ENABLED,
-                OPENAI_API_ROUTING_ENABLED,
-            ),
-        ) else {
-            panic!()
-        };
-        assert_eq!(chosen.step, StepId::ImplementerClaude);
-    }
-
-    #[test]
-    fn claude_cutoff_moves_smoothly_by_hours() {
-        let now = 1_000_000;
-        let reset = now + (3.5 * 86_400.0) as i64;
-        let configured = |step| {
-            matches!(
-                step,
-                StepId::ImplementerClaude | StepId::ImplementerDeepSeek
-            )
-        };
-        // 3.5 days reserves 49 points, not a rounded-up 4 days (56 points).
-        let readings = [reading(
-            AccountKind::ClaudePlan,
-            Some(50.9),
-            Some(reset),
-            None,
-        )];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
-            Role::Implementer,
-            Difficulty::Simple,
-            &readings,
-            &[],
-            ApiHeadroom::default(),
-            now,
-            (
-                configured,
-                CODEX_PLAN_ROUTING_ENABLED,
-                OPENAI_API_ROUTING_ENABLED,
-            ),
-        ) else {
-            panic!()
-        };
-        assert_eq!(chosen.step, StepId::ImplementerClaude);
-
-        let readings = [reading(
-            AccountKind::ClaudePlan,
-            Some(51.0),
-            Some(reset),
-            None,
-        )];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
-            Role::Implementer,
-            Difficulty::Simple,
-            &readings,
-            &[],
-            ApiHeadroom::default(),
-            now,
-            (
-                configured,
-                CODEX_PLAN_ROUTING_ENABLED,
-                OPENAI_API_ROUTING_ENABLED,
-            ),
-        ) else {
-            panic!()
-        };
-        assert_eq!(chosen.step, StepId::ImplementerDeepSeek);
+        // No reserve: days to reset never matter, only the 2% cutoff.
+        for (used, days, expected) in [
+            (10.0, 6.0, StepId::ImplementerClaude),
+            (97.9, 6.0, StepId::ImplementerClaude),
+            (97.9, 0.1, StepId::ImplementerClaude),
+            (98.5, 6.0, StepId::ImplementerDeepSeek),
+        ] {
+            let readings = [reading(
+                AccountKind::ClaudePlan,
+                Some(used),
+                Some(now + (days * 86_400.0) as i64),
+                None,
+            )];
+            let RouteOutcome::Chosen(chosen) = resolve_with(
+                Role::Implementer,
+                Difficulty::Simple,
+                &readings,
+                &[],
+                ApiHeadroom::default(),
+                now,
+                (
+                    configured,
+                    CODEX_PLAN_ROUTING_ENABLED,
+                    OPENAI_API_ROUTING_ENABLED,
+                ),
+            ) else {
+                panic!()
+            };
+            assert_eq!(chosen.step, expected, "{used}% used, {days} days left");
+        }
     }
 
     #[test]
@@ -1325,16 +1191,10 @@ mod tests {
 }
 
 #[cfg(test)]
-mod claude_reserve_tests {
+mod claude_limit_tests {
     use super::*;
     #[test]
-    fn claude_implementer_reserve_stays_for_one_plan_and_drops_for_two() {
-        assert_eq!(
-            claude_reserve(5.0, 1),
-            (5.0 * ROLE_R_POINTS_PER_DAY).max(CLAUDE_ACCOUNT_CUTOFF_PERCENT)
-        );
-        assert_eq!(claude_reserve(5.0, 2), CLAUDE_ACCOUNT_CUTOFF_PERCENT);
-        assert_eq!(claude_reserve(0.1, 1), CLAUDE_ACCOUNT_CUTOFF_PERCENT);
+    fn claude_usage_limit_errors_are_recognized() {
         assert!(is_claude_usage_limit(
             "Claude reported an error: You've hit your limit. Resets Nov 10."
         ));

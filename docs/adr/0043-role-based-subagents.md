@@ -14,8 +14,8 @@ use are turned off for new provider launches.
 ## Roles and efforts
 
 Planners take no difficulty and use Opus high on the Claude plan. They remain
-available until the Claude weekly allowance reaches the 2% cutoff, without the Sonnet R
-reserve and without a fallback. An exhausted planner request is refused with the
+available until the Claude weekly allowance reaches the 2% cutoff, without a
+fallback. An exhausted planner request is refused with the
 Claude reset time. Missing readings and readings past reset count as available.
 
 planner: only when the owner explicitly asks for a planner. Agents must not spawn
@@ -27,9 +27,9 @@ Implementers take a difficulty of `simple` or `hard`:
 
 1. Sol on the Codex plan allowance, medium or high.
 2. Sol on the Codex plan credits while the balance is positive, medium or high.
-3. Sonnet on a Claude plan, medium or high. With one enabled plan its remaining
-   weekly allowance must exceed days to reset times R and the 2% cutoff. With
-   multiple plans only the 2% cutoff applies (ADR 0047).
+3. Sonnet on a Claude plan, medium or high, until the account reaches the 2% cutoff.
+   There is no reserve: Sonnet only runs once Sol is used up, so it may drain Claude
+   to the cutoff (ADR 0047).
 4. DeepSeek V4.1 Flash 1017 through Pi, medium or high.
 
 Reviewers take no difficulty:
@@ -58,8 +58,7 @@ and explicit model choices keep working. There is no settings screen (ADR 0018).
 
 The OpenAI API credit is reserved for Luna reviews. Implementers use the ordered
 plan, credits, Claude and DeepSeek chain above.
-R starts at 14 percentage points of the Claude weekly plan per day
-(`ROLE_R_POINTS_PER_DAY`). It is measured later from `usage_report`. A reading
+A reading
 past its reset counts as available, and a plan account with no reading counts as
 available. A step with an
 active quota or billing exhaustion mark is skipped until its reset. There are no
@@ -74,8 +73,7 @@ OpenAI API quota or billing mark lasts until the start of the next OPENAI_API_CR
 last day when it is shorter. The Claude API account has $200 of monthly credit;
 quota or billing rejection marks that API account exhausted until the next
 `ANTHROPIC_API_CREDIT_RESET_DAY` UTC. That tunable defaults to 1 until the actual
-renewal date is known. It uses exhaustion marks, without the Claude plan cutoff
-or Sonnet reserve. A step with no known reset, currently DeepSeek, is
+renewal date is known. It uses exhaustion marks, without the Claude plan cutoff. A step with no known reset, currently DeepSeek, is
 retried after `ROLE_EXHAUSTION_RETRY` (one hour). The resolver reads the marks in
 the same request that chooses a route, so a marked step is skipped immediately.
 
@@ -112,7 +110,7 @@ long reviews keep their account and may send several requests per minute.
 The route reason includes the measured number that blocked an API spawn and
 the chosen fallback. Haiku API fallback depends on credit exhaustion marks.
 
-The role table, efforts, R and model IDs are constants in `crates/tuning`. The
+The role table, efforts and model IDs are constants in `crates/tuning`. The
 resolver is pure: `resolve(role, difficulty, readings, exhausted_marks, api_headroom, now)`
 returns a chosen route or an exhausted outcome with one plain-English reason per
 step (ADR 0021). It does no I/O and takes `now` explicitly, so every boundary is

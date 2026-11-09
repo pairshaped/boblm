@@ -270,8 +270,6 @@ pub const ROLE_IMPLEMENTER_HARD_EFFORT: &str = "high";
 pub const ROLE_IMPLEMENTER_SIMPLE_EFFORT: &str = "medium";
 /// Fixed effort for Opus planning and hard design questions.
 pub const ROLE_PLANNER_EFFORT: &str = "high";
-/// Daily share of the Claude weekly plan reserved for Opus, in percentage points.
-pub const ROLE_R_POINTS_PER_DAY: f64 = 14.0;
 /// Effort for the DeepSeek reviewer fallback.
 pub const ROLE_REVIEWER_DEEPSEEK_EFFORT: &str = "high";
 /// Effort for Haiku reviews on the Claude Platform API credit.

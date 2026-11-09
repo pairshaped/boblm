@@ -36,8 +36,8 @@ Missing readings and expired reset windows count as available for routing,
 consistent with ADR 0043; the meters continue to report unavailable data.
 Expired samples do not become invented zero-usage observations.
 
-The Sonnet implementer step keeps the days-to-reset times R reserve with one
-plan account enabled. With two or more enabled, it uses only the 2% cutoff.
+The Sonnet implementer step has no reserve. It uses only the 2% cutoff, with one
+plan account or several.
 Haiku API reviewers choose the first enabled API account with credit that has
 no active exhaustion mark, A then B. Unknown credit balances are allowed.
 Quota or billing failures mark the individual API account until the configured
