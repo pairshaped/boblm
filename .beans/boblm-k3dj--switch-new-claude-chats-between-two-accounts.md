@@ -1,27 +1,27 @@
 ---
 # boblm-k3dj
-title: Switch new Claude chats between two accounts
-status: draft
+title: Run two Claude accounts with automatic handoff
+status: todo
 type: feature
 priority: normal
 created_at: 2026-10-31T17:11:17Z
 updated_at: 2026-10-31T17:34:32Z
 ---
 
-Optional support for a second Claude Max account, for months when one account's weekly allowance isn't enough. Only the weekly cap matters at the $200 tier; the five-hour window is a non-issue.
+Support a second Claude plan (Ultra), so Claude work continues when one account's weekly allowance runs out.
 
-## Intended design
+## Decisions
 
-- Each account gets its own `CLAUDE_CONFIG_DIR`, logged in once. BobLM already passes `CLAUDE_CONFIG_DIR` through to Claude children (`crates/server/src/persistent.rs`).
-- First version: a single manual toggle (Claude 1 / Claude 2) that picks the account for **new** chats. No per-account usage tracking needed; the owner watches the weekly meter.
-- A chat stays pinned to the account it started on. Session transcripts live under each config dir and the prompt cache is per account, so switching mid-chat breaks resume or re-sends the whole context at full price.
-- Drain sequentially, never alternate: use the account whose regular weekly reset comes first until it is nearly drained, then switch to the other. If both are drained, spend a banked reset on the account that resets later. Sequential use also looks less like account pooling than alternating does.
+- Owner decision 97 (2026-11-09): BobLM chooses the account automatically. No toggle, so ADR 0018 stands. New Claude chats use the account whose weekly reset comes first, until it has 2% of its weekly allowance left, then the other account.
+- Both accounts can run at once: each has its own `CLAUDE_CONFIG_DIR`, logged in once. Claude children already receive `CLAUDE_CONFIG_DIR` (`crates/server/src/persistent.rs`).
+- Direct handoff: when an account reaches the 2% cutoff, BobLM moves each of its chats to the other account at its next idle point. It copies the Claude transcript into the other config dir and resumes the same conversation ID there. New chats start on the other account. A chat is never moved back and forth, because the prompt cache does not carry across accounts and the first turn after a move pays for the full context.
+- A quota or usage-limit error on a turn triggers the same handoff immediately, with a short note to the agent that its last turn was cut off.
+- Reuse the Codex account-key pattern: per-session `account_key`, per-account usage readings (ADR 0037) and role routing readings, so the Sonnet implementer step and its reserve see both accounts.
 
 ## Open questions
 
-- [ ] ADR 0018 forbids settings screens. Record the toggle as a deliberate exception in an ADR and choose where it lives (composer or sidebar).
-- [ ] Chats pinned to a drained account stall until its reset. Decide whether to wait or move them once. Moving depends on Claude Code resuming from a copied transcript, which is unverified.
-- [ ] Optional later: automatic switching. Needs a weekly usage record per account (ADR 0037 keeps samples per chat) that stays fresh while the account is idle. Switch at about 5 to 10% remaining, not 1%, since one long Opus turn can burn more than 1%.
+- [ ] Verify Claude Code resumes a conversation from a transcript copied into another config dir. If it can't, the fallback is: chats finish on their account until its hard limit and then wait, while new chats use the other account.
+- [ ] Decide how the R reserve for the Sonnet implementer step counts two accounts (combined remaining, or only the active account).
 
 ## Risks
 
