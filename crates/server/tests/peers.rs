@@ -2408,3 +2408,101 @@ async fn spawn_peer_refuses_a_missing_or_non_directory_project() {
     assert_eq!(store.reader().unwrap().sessions().unwrap().len(), 1);
     app.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn compact_is_caller_bound_and_reports_context_on_acceptance_and_refusal() {
+    let temp = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
+    let store = Store::open(temp.path().join("compact.sqlite")).unwrap();
+    store.create_session("caller", "/caller", 1).unwrap();
+    store.create_session("peer", "/peer", 2).unwrap();
+    store
+        .record_event(
+            "caller",
+            "agent_event",
+            serde_json::json!({
+                "type":"usage", "context":{"usedTokens":65_000,"windowTokens":100_000}
+            }),
+            3,
+        )
+        .unwrap();
+    let token = "compact-test-owner-token";
+    let app = App::open(store, Arc::new(NeverSpawn), token.into())
+        .await
+        .unwrap();
+    let router = app.router(Some(temp.path().into()));
+    assert!(
+        tool_names(&router, token, "caller")
+            .await
+            .iter()
+            .any(|name| name == "compact")
+    );
+    let response = call(
+        &router,
+        token,
+        "caller",
+        "compact",
+        serde_json::json!({"instructions":"Keep the next phase."}),
+    )
+    .await;
+    assert_eq!(response["result"]["isError"], false, "{response}");
+    let report: serde_json::Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(report["queued"], true);
+    assert_eq!(
+        report["context"],
+        serde_json::json!({"used":65_000,"window":100_000,"percent":65.0})
+    );
+    let inspected = call(
+        &router,
+        token,
+        "peer",
+        "inspect_peer",
+        serde_json::json!({"sessionIdPrefix":"caller"}),
+    )
+    .await;
+    let inspected: serde_json::Value =
+        serde_json::from_str(inspected["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let status = &inspected["session"]["status"];
+    assert_eq!(status["queueHeld"], true);
+    assert_eq!(status["running"], false);
+    assert_eq!(status["queued"], 1);
+    let response = call(&router, token, "caller", "compact", serde_json::json!({})).await;
+    let report: serde_json::Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(report["alreadyQueued"], true);
+    let response = call(&router, token, "peer", "compact", serde_json::json!({})).await;
+    assert_eq!(response["result"]["isError"], true);
+    let report: serde_json::Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        report["context"],
+        serde_json::json!({"used":null,"window":null,"percent":null})
+    );
+    assert!(
+        report["message"]
+            .as_str()
+            .unwrap()
+            .contains("context usage is unknown")
+    );
+    let injected = call(
+        &router,
+        token,
+        "caller",
+        "compact",
+        serde_json::json!({"sessionIdPrefix":"peer"}),
+    )
+    .await;
+    assert!(injected.get("error").is_some() || injected["result"]["isError"] == true);
+    let inspected = call(
+        &router,
+        token,
+        "caller",
+        "inspect_peer",
+        serde_json::json!({"sessionIdPrefix":"peer"}),
+    )
+    .await;
+    let inspected: serde_json::Value =
+        serde_json::from_str(inspected["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(inspected["session"]["status"]["queued"], 0);
+    app.shutdown().await.unwrap();
+}

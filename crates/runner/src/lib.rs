@@ -83,6 +83,21 @@ pub struct Status {
     pub model: String,
     pub effort: Option<String>,
 }
+/// Outcome of a self-compaction request, including refusals and the observed context size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactResult {
+    pub queued: bool,
+    pub already_queued: bool,
+    pub message: String,
+    pub context: CompactContext,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactContext {
+    pub used: Option<u64>,
+    pub window: Option<u64>,
+    pub percent: Option<f64>,
+}
 #[derive(Clone)]
 pub struct SessionHandle {
     tx: mpsc::Sender<Command>,
@@ -98,6 +113,7 @@ pub struct RunningSession {
 #[derive(Serialize, Deserialize)]
 enum Action {
     Delete,
+    Compact(Option<String>),
     Send(String, String, Vec<String>, Option<String>),
     SendAutomated(String, String),
     SubagentResult(String, String),
@@ -112,6 +128,7 @@ enum Action {
 }
 #[derive(Serialize, Deserialize)]
 enum Reply {
+    Compact(CompactResult),
     Accepted(bool),
     Status(Status),
     Done,
@@ -121,6 +138,16 @@ struct Command {
     reply: oneshot::Sender<Result<Reply>>,
 }
 impl SessionHandle {
+    /// Queue an early compaction without steering, releasing a hold or clearing Stop.
+    pub async fn compact(&self, instructions: Option<&str>) -> Result<CompactResult> {
+        match self
+            .call(Action::Compact(instructions.map(str::to_owned)))
+            .await?
+        {
+            Reply::Compact(value) => Ok(value),
+            _ => Err(Error::Closed),
+        }
+    }
     pub async fn rename(&self, name: &str) -> Result<()> {
         self.call(Action::Rename {
             name: name.into(),
@@ -402,6 +429,7 @@ struct AutoTask {
     uuid: String,
     kind: AutoKind,
     resume_after: bool,
+    dispatched: bool,
 }
 struct Actor {
     prompt_suggestion: Option<String>,
@@ -522,6 +550,15 @@ impl Actor {
     /// Reload the queue after rows expired and lift the hold when nothing is left to release.
     async fn after_expiry(&mut self) -> Result<()> {
         self.refresh().await?;
+        if self.auto_task.as_ref().is_some_and(|task| {
+            !task.dispatched
+                && !self
+                    .messages
+                    .values()
+                    .any(|message| message.uuid == task.uuid)
+        }) {
+            self.auto_task = None;
+        }
         let nothing_left = !self
             .messages
             .values()
@@ -857,6 +894,13 @@ impl Actor {
                 self.publish_status().await?;
                 Ok(Reply::Accepted(accepted || completion))
             }
+            Action::Compact(instructions) => {
+                let report = self.self_compact(instructions).await?;
+                if report.queued {
+                    self.publish_status().await?;
+                }
+                Ok(Reply::Compact(report))
+            }
             Action::Status => Ok(Reply::Status(self.status().await?)),
             Action::Resume => {
                 if self.session().await?.archived {
@@ -980,7 +1024,7 @@ impl Actor {
             }
         }
     }
-    async fn context_percent(&self) -> Result<Option<f64>> {
+    async fn context_usage(&self) -> Result<Option<boblm_protocol::usage::ContextUsage>> {
         let id = self.id.clone();
         let samples = self
             .db(move |store| store.reader()?.usage_samples(&id))
@@ -991,10 +1035,85 @@ impl Actor {
                 serde_json::from_str::<boblm_protocol::usage::ContextUsage>(&raw).ok()
             })
             .filter(|context| context.window_tokens > 0);
-        Ok(
-            context
-                .map(|context| 100.0 * context.used_tokens as f64 / context.window_tokens as f64),
-        )
+        Ok(context)
+    }
+    async fn context_percent(&self) -> Result<Option<f64>> {
+        Ok(self
+            .context_usage()
+            .await?
+            .map(|context| 100.0 * context.used_tokens as f64 / context.window_tokens as f64))
+    }
+    async fn self_compact(&mut self, instructions: Option<String>) -> Result<CompactResult> {
+        let usage = self.context_usage().await?;
+        let context = CompactContext {
+            used: usage.as_ref().map(|value| value.used_tokens),
+            window: usage.as_ref().map(|value| value.window_tokens),
+            percent: usage
+                .as_ref()
+                .map(|value| 100.0 * value.used_tokens as f64 / value.window_tokens as f64),
+        };
+        let session = self.session().await?;
+        let refusal = if session.agent == "pi" {
+            Some("DeepSeek cache reads are nearly free, so compacting only loses detail. BobLM already auto-compacts Pi when it nears its window. Continue working instead.".to_owned())
+        } else if context.percent.is_none() {
+            Some("BobLM cannot compact this chat because its context usage is unknown. Continue working until the provider reports its context size.".to_owned())
+        } else if context
+            .percent
+            .is_some_and(|percent| percent < f64::from(boblm_tuning::SELF_COMPACT_MIN_PERCENT))
+        {
+            Some(format!(
+                "BobLM cannot compact this chat because its context is below the {}% minimum. Continue working and finish instead if little work remains.",
+                boblm_tuning::SELF_COMPACT_MIN_PERCENT
+            ))
+        } else if session.archived {
+            Some("BobLM cannot compact this chat because it is archived. Reopen it before requesting compaction.".to_owned())
+        } else {
+            None
+        };
+        if let Some(message) = refusal {
+            return Ok(CompactResult {
+                queued: false,
+                already_queued: false,
+                message,
+                context,
+            });
+        }
+        // Include recovered and owner-queued compactions, so a reconnect cannot duplicate one.
+        let already_queued = self
+            .auto_task
+            .as_ref()
+            .is_some_and(|task| task.kind == AutoKind::Compact)
+            || self.compacting
+            || self.messages.values().any(|message| {
+                matches!(message.delivery_state.as_str(), "queued" | "dispatching")
+                    && message.content.split_whitespace().next() == Some("/compact")
+            });
+        if !already_queued {
+            let content = match instructions {
+                Some(instructions) if !instructions.is_empty() => {
+                    format!("/compact {instructions}")
+                }
+                _ => "/compact".to_owned(),
+            };
+            if content.len() > boblm_protocol::client::MAX_BODY_BYTES {
+                return Ok(CompactResult {
+                    queued: false, already_queued: false,
+                    message: "BobLM cannot queue compaction because its instructions exceed 1 MiB. Shorten the instructions and try again.".to_owned(),
+                    context,
+                });
+            }
+            self.enqueue_auto(&content, AutoKind::Compact, true).await?;
+        }
+        Ok(CompactResult {
+            queued: true,
+            already_queued,
+            message: if already_queued {
+                "Compaction is already queued or running; the first instructions are retained. End your turn at the phase boundary. Stop and held queues still prevent dispatch."
+            } else {
+                "Compaction is queued for after this turn and all outstanding acknowledgments settle. End your turn at the phase boundary. Stop and held queues still prevent dispatch."
+            }.to_owned(),
+            context,
+        })
     }
     async fn enqueue_auto(
         &mut self,
@@ -1029,6 +1148,7 @@ impl Actor {
             uuid,
             kind,
             resume_after,
+            dispatched: false,
         });
         self.refresh().await
     }
@@ -1254,6 +1374,11 @@ impl Actor {
                 // It aged past the limit while the driver started; it is expired, never sent.
                 self.after_expiry().await?;
                 continue;
+            }
+            if let Some(task) = &mut self.auto_task
+                && task.uuid == message.uuid
+            {
+                task.dispatched = true;
             }
             self.pending.insert(
                 message.uuid.clone(),
@@ -1583,9 +1708,12 @@ impl Actor {
                 self.provider_rejection = false;
                 let succeeded =
                     is_error != Some(true) && subtype.as_deref() != Some("context_overflow");
-                if let Some(task) = self.auto_task.take() {
+                // A self-compaction can be queued during the turn producing this result.
+                // Retain it until a result follows dispatch of the automated command itself.
+                let auto_dispatched = self.auto_task.as_ref().is_some_and(|task| task.dispatched);
+                if let Some(task) = auto_dispatched.then(|| self.auto_task.take()).flatten() {
                     match task.kind {
-                        AutoKind::Compact if task.resume_after && succeeded => {
+                        AutoKind::Compact if task.resume_after && succeeded && !self.stopped => {
                             self.enqueue_auto("boblm: continue", AutoKind::Resume, false)
                                 .await?;
                         }

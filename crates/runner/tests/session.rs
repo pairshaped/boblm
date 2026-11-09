@@ -3545,3 +3545,260 @@ async fn runaway_root_chats_are_never_limited() {
     assert!(!client.status().await.unwrap().queue_held);
     runner.shutdown().await.unwrap();
 }
+
+async fn self_compact_context(h: &Harness, client: &boblm_runner::SessionHandle, used: u64) {
+    h.events.send(context(used, 100_000)).unwrap();
+    wait_status(client, |status| {
+        status
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.context.as_ref())
+            .is_some_and(|context| context.used_tokens == used)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn self_compact_waits_for_turn_and_acknowledgments_and_deduplicates() {
+    for agent in ["claude", "codex"] {
+        let mut h = Harness::new_with_agent(agent);
+        let runner = h.start().await;
+        let client = runner.handle();
+        client.send(A, "phase one").await.unwrap();
+        h.input().await;
+        h.lifecycle(A, LifecycleState::Started);
+        client
+            .send_from_peer(B, "follow-up", "other")
+            .await
+            .unwrap();
+        assert_eq!(h.input().await.uuid, B);
+        h.lifecycle(B, LifecycleState::Queued);
+        self_compact_context(&h, &client, 65_000).await;
+        let report = client
+            .compact(Some("Keep phase two's requirements.\nKeep test results."))
+            .await
+            .unwrap();
+        assert!(report.queued && !report.already_queued);
+        assert_eq!(report.context.used, Some(65_000));
+        assert_eq!(report.context.window, Some(100_000));
+        assert_eq!(report.context.percent, Some(65.0));
+        for _ in 0..3 {
+            assert!(
+                client
+                    .compact(Some("ignored replacement"))
+                    .await
+                    .unwrap()
+                    .already_queued
+            );
+        }
+        assert_eq!(client.status().await.unwrap().queued, 1);
+        assert!(h.inputs.try_recv().is_err());
+        assert_eq!(h.interrupts.load(Ordering::SeqCst), 0);
+        h.result();
+        wait_status(&client, |status| {
+            !status.turn_active && status.dispatching == 1
+        })
+        .await;
+        assert!(
+            h.inputs.try_recv().is_err(),
+            "compaction must await follow-up acknowledgment"
+        );
+        assert!(client.compact(None).await.unwrap().already_queued);
+        h.lifecycle(B, LifecycleState::Completed);
+        let compact = h.input().await;
+        assert_eq!(
+            compact.content,
+            "/compact Keep phase two's requirements.\nKeep test results."
+        );
+        assert_eq!(compact.priority, None, "compaction must never steer");
+        assert!(!compact.human);
+        h.lifecycle(&compact.uuid, LifecycleState::Started);
+        wait_status(&client, |status| {
+            status.turn_active && status.dispatching == 0
+        })
+        .await;
+        assert!(client.compact(None).await.unwrap().already_queued);
+        h.events.send(compaction("compact_boundary")).unwrap();
+        h.result();
+        let continuation = h.input().await;
+        assert_eq!(continuation.content, "boblm: continue");
+        assert_eq!(continuation.priority, None);
+        assert!(!continuation.human);
+        h.lifecycle(&continuation.uuid, LifecycleState::Started);
+        h.result();
+        wait_status(&client, |status| {
+            !status.turn_active && status.dispatching == 0 && status.queued == 0
+        })
+        .await;
+        assert!(h.inputs.try_recv().is_err());
+        runner.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn self_compact_refuses_pi_low_and_unknown_context_without_dispatch() {
+    for (agent, used, reason) in [
+        ("pi", Some(65_000), "DeepSeek cache reads are nearly free"),
+        ("claude", Some(49_999), "below the 50% minimum"),
+        ("codex", None, "context usage is unknown"),
+    ] {
+        let mut h = Harness::new_with_agent(agent);
+        let runner = h.start().await;
+        let client = runner.handle();
+        client.send(A, "work").await.unwrap();
+        h.input().await;
+        h.lifecycle(A, LifecycleState::Started);
+        if let Some(used) = used {
+            self_compact_context(&h, &client, used).await;
+        }
+        let report = client.compact(None).await.unwrap();
+        assert!(!report.queued && !report.already_queued);
+        assert!(report.message.contains(reason), "{}", report.message);
+        assert_eq!(report.context.used, used);
+        assert_eq!(report.context.window, used.map(|_| 100_000));
+        assert_eq!(
+            report.context.percent,
+            used.map(|used| used as f64 / 1_000.0)
+        );
+        assert_eq!(client.status().await.unwrap().queued, 0);
+        assert!(h.inputs.try_recv().is_err());
+        runner.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn self_compact_preserves_stop_before_and_after_request() {
+    for stop_first in [false, true] {
+        let mut h = Harness::new();
+        let runner = h.start().await;
+        let client = runner.handle();
+        client.send(A, "work").await.unwrap();
+        h.input().await;
+        h.lifecycle(A, LifecycleState::Started);
+        self_compact_context(&h, &client, 65_000).await;
+        if stop_first {
+            client.stop().await.unwrap();
+        }
+        assert!(client.compact(None).await.unwrap().queued);
+        if !stop_first {
+            client.stop().await.unwrap();
+        }
+        let status = client.status().await.unwrap();
+        assert!(status.stopped && status.queue_held && !status.stopping);
+        assert_eq!(status.queued, 1);
+        assert!(h.inputs.try_recv().is_err());
+        client.resume().await.unwrap();
+        assert_eq!(h.input().await.content, "/compact");
+        runner.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn self_compact_keeps_recovered_queue_held_and_deduplicates_across_restart() {
+    let mut h = Harness::new();
+    let runner = h.start().await;
+    let client = runner.handle();
+    client.send(A, "work").await.unwrap();
+    h.input().await;
+    h.lifecycle(A, LifecycleState::Started);
+    self_compact_context(&h, &client, 65_000).await;
+    runner.shutdown().await.unwrap();
+    let recovered = h.start().await;
+    let client = recovered.handle();
+    assert!(client.status().await.unwrap().queue_held);
+    assert!(
+        client
+            .compact(Some("first instructions"))
+            .await
+            .unwrap()
+            .queued
+    );
+    assert!(client.status().await.unwrap().queue_held);
+    assert_eq!(client.status().await.unwrap().queued, 1);
+    recovered.shutdown().await.unwrap();
+    let recovered = h.start().await;
+    let client = recovered.handle();
+    assert!(
+        client
+            .compact(Some("ignored"))
+            .await
+            .unwrap()
+            .already_queued
+    );
+    let status = client.status().await.unwrap();
+    assert!(status.queue_held && !status.running);
+    assert_eq!(status.queued, 1);
+    assert!(h.inputs.try_recv().is_err());
+    recovered.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn self_compact_crosses_persistent_runner_transport_without_steering() {
+    let mut h = Harness::new();
+    let runner = h.start().await;
+    let owner = runner.handle();
+    let socket = h._temp.path().join("compact.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let host = tokio::spawn(boblm_runner::transport::serve(listener, owner.clone()));
+    let proxy = RunningSession::attach(h.store.clone(), "s", socket, None)
+        .await
+        .unwrap();
+    let client = proxy.handle();
+    client.send(A, "work").await.unwrap();
+    h.input().await;
+    h.lifecycle(A, LifecycleState::Started);
+    self_compact_context(&h, &owner, 65_000).await;
+    let report = client
+        .compact(Some("Keep the requirements."))
+        .await
+        .unwrap();
+    assert!(report.queued && !report.already_queued);
+    assert_eq!(report.context.used, Some(65_000));
+    assert_eq!(report.context.window, Some(100_000));
+    assert_eq!(report.context.percent, Some(65.0));
+    assert_eq!(client.published_status().unwrap().queued, 1);
+    assert!(h.inputs.try_recv().is_err());
+    h.result();
+    let compact = h.input().await;
+    assert_eq!(compact.content, "/compact Keep the requirements.");
+    assert_eq!(compact.priority, None);
+    proxy.shutdown().await.unwrap();
+    runner.shutdown().await.unwrap();
+    host.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn self_compact_continuation_requires_success_and_preserves_stop() {
+    for stopped in [false, true] {
+        let mut h = Harness::new();
+        let runner = h.start().await;
+        let client = runner.handle();
+        client.send(A, "work").await.unwrap();
+        h.input().await;
+        h.lifecycle(A, LifecycleState::Started);
+        self_compact_context(&h, &client, 65_000).await;
+        client.compact(None).await.unwrap();
+        h.result();
+        let compact = h.input().await;
+        h.lifecycle(&compact.uuid, LifecycleState::Started);
+        wait_status(&client, |status| {
+            status.dispatching == 0 && status.turn_active
+        })
+        .await;
+        if stopped {
+            client.stop().await.unwrap();
+            let status = client.status().await.unwrap();
+            assert!(status.stopped && status.queue_held);
+            assert_eq!(status.queued, 0, "Stop must cancel automatic continuation");
+            assert!(h.inputs.try_recv().is_err());
+        } else {
+            h.events.send(result("error", true)).unwrap();
+            wait_status(&client, |status| !status.turn_active && status.queued == 0).await;
+            assert!(
+                h.inputs.try_recv().is_err(),
+                "failed compaction must not continue work"
+            );
+        }
+        runner.shutdown().await.unwrap();
+    }
+}

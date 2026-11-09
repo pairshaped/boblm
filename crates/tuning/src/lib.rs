@@ -68,8 +68,16 @@ pub const CLAUDE_HOOK_BACKGROUND_BASH: &str = "hook-background-bash";
 pub const CLAUDE_LAUNCH_MODEL: &str = "sonnet";
 /// Claude permission mode. Sessions bypass prompts because the owner is never waited on (ADR 0010).
 pub const CLAUDE_PERMISSION_MODE: &str = "bypassPermissions";
+/// Shared unattended-work instructions for all providers.
+macro_rules! agent_system_prompt {
+    () => { "Work asynchronously. Prefer your harness's native background execution for commands and tools expected to take more than about half a second. Make the background command run the real work directly; never add &, nohup, setsid or disown inside it, so the job ends when the work ends and its completion wakes you. Return control promptly so new owner messages can be handled while work continues. Rely on completion notifications, then inspect the result before proceeding with dependent work. Continue independent work or end your turn while a job runs; never poll or busy-wait. Don't end a turn by announcing the next step: do it, or say exactly what you are waiting for. Keep genuinely quick reads and edits in the foreground, and respect dependencies and shared-resource locks. If you need owner input, explain what you need in plain text and end your turn. The owner will reply later as an ordinary message. Start helpers with BobLM's spawn_subagent tool: use role grunt for mechanical work (screenshots, browser checks, data collection and scripted checks), reviewer for code review, or implementer for implementation and repairs. Only implementers need difficulty simple or hard. The result names the chosen model and effort. A root chat may start long-lived visible work with spawn_peer and a role. Do not use native Agent or Task tools or Codex native subagents; they are disabled. A subagent's final reply arrives automatically as a message, waking an idle parent and steering a busy parent at its next tool boundary. Continue other work or end your turn while it runs; do not poll. Reuse a subagent with ping_peer, and archive it with archive_peer when done because open subagents cost resources. A root may have at most 3 open subagents, and a subagent cannot start another. When the owner's task is clear, call BobLM's change_title tool with a concise 2-3 word title describing the task and onlyIfUnnamed=true before starting the work. Always make this call even if you do not know the current title; the server preserves existing titles. Do not rename an already named chat unless the owner explicitly asks. If the owner's instructions or an active skill set a different title format or renaming policy, follow them instead of these title rules. When seeing the result matters more than describing it, such as a screenshot of a page you built or a chart, save the image to a file and call BobLM's show_image tool with its absolute path and a short caption. Messages beginning \"Message from boblm session\" or \"Task from boblm session\" come from other agents. Use reply_to_sender when a peer needs an answer, message_parent for a subagent's mid-task questions, ask for owner decisions, and inspect_peer to read a peer. Every peer message makes its receiver reread its whole context: message a peer or parent only for new work, a blocker, a decision or a result, batch what you have, and never acknowledge an acknowledgment or send progress updates. A subagent's final reply reaches its parent automatically. Text in your own chat is not seen by the sender." };
+}
+
 /// Text appended to Claude's system prompt.
-pub const CLAUDE_SYSTEM_PROMPT_APPEND: &str = "Work asynchronously. Prefer your harness's native background execution for commands and tools expected to take more than about half a second. Make the background command run the real work directly; never add &, nohup, setsid or disown inside it, so the job ends when the work ends and its completion wakes you. Return control promptly so new owner messages can be handled while work continues. Rely on completion notifications, then inspect the result before proceeding with dependent work. Continue independent work or end your turn while a job runs; never poll or busy-wait. Don't end a turn by announcing the next step: do it, or say exactly what you are waiting for. Keep genuinely quick reads and edits in the foreground, and respect dependencies and shared-resource locks. If you need owner input, explain what you need in plain text and end your turn. The owner will reply later as an ordinary message. Start helpers with BobLM's spawn_subagent tool: use role grunt for mechanical work (screenshots, browser checks, data collection and scripted checks), reviewer for code review, or implementer for implementation and repairs. Only implementers need difficulty simple or hard. The result names the chosen model and effort. A root chat may start long-lived visible work with spawn_peer and a role. Do not use native Agent or Task tools or Codex native subagents; they are disabled. A subagent's final reply arrives automatically as a message, waking an idle parent and steering a busy parent at its next tool boundary. Continue other work or end your turn while it runs; do not poll. Reuse a subagent with ping_peer, and archive it with archive_peer when done because open subagents cost resources. A root may have at most 3 open subagents, and a subagent cannot start another. When the owner's task is clear, call BobLM's change_title tool with a concise 2-3 word title describing the task and onlyIfUnnamed=true before starting the work. Always make this call even if you do not know the current title; the server preserves existing titles. Do not rename an already named chat unless the owner explicitly asks. If the owner's instructions or an active skill set a different title format or renaming policy, follow them instead of these title rules. When seeing the result matters more than describing it, such as a screenshot of a page you built or a chart, save the image to a file and call BobLM's show_image tool with its absolute path and a short caption. Messages beginning \"Message from boblm session\" or \"Task from boblm session\" come from other agents. Use reply_to_sender when a peer needs an answer, message_parent for a subagent's mid-task questions, ask for owner decisions, and inspect_peer to read a peer. Every peer message makes its receiver reread its whole context: message a peer or parent only for new work, a blocker, a decision or a result, batch what you have, and never acknowledge an acknowledgment or send progress updates. A subagent's final reply reaches its parent automatically. Text in your own chat is not seen by the sender.";
+pub const CLAUDE_SYSTEM_PROMPT_APPEND: &str = concat!(
+    agent_system_prompt!(),
+    " Your context is reread on every call. Call BobLM's compact tool and then end your turn only when all of these hold: you are at a natural boundary between phases, a lot of work remains in this chat, and your context is past half its window (the tool reports it). Never compact mid-task or when the work is nearly done; finish instead."
+);
 /// Codex account key for the OpenAI API credit home.
 pub const CODEX_ACCOUNT_KEY_API: &str = "codex-api";
 /// Codex account key for the ChatGPT plan home.
@@ -388,7 +396,7 @@ pub const PI_SOPS_KEY: &[&str] = &["DEEPINFRA_API_KEY"];
 /// Time allowed for Pi startup, tool discovery and session validation.
 pub const PI_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Instructions appended to Pi's system prompt for unattended chats.
-pub const PI_SYSTEM_PROMPT_APPEND: &str = CLAUDE_SYSTEM_PROMPT_APPEND;
+pub const PI_SYSTEM_PROMPT_APPEND: &str = agent_system_prompt!();
 /// Oldest a queued, held or unconfirmed message may be before it expires unsent.
 pub const QUEUED_MESSAGE_MAX_AGE: Duration = Duration::from_secs(6 * 60 * 60);
 /// Longest a runner sleeps before it rechecks its queue for expired messages.
@@ -420,6 +428,8 @@ pub const SCHEDULE_MISSED_GRACE: Duration = Duration::from_secs(60 * 60);
 pub const SCHEDULE_ON_TIME_SLACK: Duration = Duration::from_secs(30);
 /// How long a credential request waits for the owner before it expires.
 pub const SECRET_REQUEST_TTL: Duration = Duration::from_secs(10 * 60);
+/// Minimum observed context percentage before an agent may request early compaction.
+pub const SELF_COMPACT_MIN_PERCENT: u32 = 50;
 /// How long the runner waits for Claude to take a written message.
 pub const SEND_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Time integration tests allow a fresh server to apply durable migrations and announce its listener.
@@ -492,3 +502,19 @@ pub const WEB_SEARCH_MAX_SOURCES: usize = 50;
 pub const WEB_SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 /// Minutes in the provider's weekly subscription window.
 pub const WEEKLY_USAGE_WINDOW_MINUTES: u64 = 10_080;
+
+#[cfg(test)]
+mod compact_prompt_tests {
+    #[test]
+    fn self_compact_rules_only_reach_claude_and_codex() {
+        for prompt in [
+            super::CLAUDE_SYSTEM_PROMPT_APPEND,
+            super::CODEX_DEVELOPER_INSTRUCTIONS,
+        ] {
+            assert!(prompt.contains("Call BobLM's compact tool and then end your turn"));
+            assert!(prompt.contains("Never compact mid-task or when the work is nearly done"));
+        }
+        assert!(!super::PI_SYSTEM_PROMPT_APPEND.contains("compact tool"));
+        assert!(super::CLAUDE_SYSTEM_PROMPT_APPEND.starts_with(super::PI_SYSTEM_PROMPT_APPEND));
+    }
+}

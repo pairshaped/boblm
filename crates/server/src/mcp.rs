@@ -117,6 +117,12 @@ struct CancelArgs {
     schedule_id: String,
 }
 #[derive(serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CompactArgs {
+    /// Optional instructions passed unchanged after /compact.
+    instructions: Option<String>,
+}
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct TitleArgs {
     title: String,
@@ -695,6 +701,41 @@ impl Peers {
             self.app.archive_cascade(&session.id, true).await.map_err(|e|e.to_string())?;
             Ok(serde_json::json!({"sessionId":session.id,"archived":true,"historyRetained":true}))
         }.await)
+    }
+    #[tool(
+        description = "Queue early context compaction for THIS chat after the current turn and outstanding acknowledgments finish, then end your turn at a natural phase boundary. Only use it when much work remains and context is past half its window. Optional instructions pass through after /compact. Reports used tokens, window and percent, including refusals for Pi or unknown or low context. Repeated calls queue only one compaction; the first instructions are retained. After successful compaction, BobLM queues a continuation. Never steers, interrupts, releases a held queue or overrides Stop."
+    )]
+    async fn compact(
+        &self,
+        Parameters(args): Parameters<CompactArgs>,
+        context: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        let outcome = async {
+            let id = caller(&context)?;
+            let handle = self.app.handle(&id).await.map_err(|error| {
+                format!("BobLM could not reach this chat to queue compaction: {error}. Inspect the chat before retrying.")
+            })?;
+            handle.compact(args.instructions.as_deref()).await.map_err(|error| {
+                format!("BobLM could not confirm this chat's compaction request: {error}. Inspect the chat before retrying.")
+            })
+        }.await;
+        match outcome {
+            Ok(report) => {
+                let content = vec![ContentBlock::text(serde_json::json!(report).to_string())];
+                if report.queued {
+                    CallToolResult::success(content)
+                } else {
+                    CallToolResult::error(content)
+                }
+            }
+            Err(message) => CallToolResult::error(vec![ContentBlock::text(
+                serde_json::json!({
+                    "queued": false, "alreadyQueued": false, "message": message,
+                    "context": {"used": null, "window": null, "percent": null}
+                })
+                .to_string(),
+            )]),
+        }
     }
     #[tool(
         description = "Set the title of this session. When starting a task, call this with a 2-3 word task title and onlyIfUnnamed=true, which preserves any existing title. To rename a chat that already has a title, when the owner asks or the owner's instructions or an active skill call for it, omit onlyIfUnnamed. Titles must contain 1 through 200 characters. The current session is bound by the MCP connection and cannot be supplied as an argument."

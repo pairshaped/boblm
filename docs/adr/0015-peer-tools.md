@@ -30,6 +30,18 @@ for omit the condition. The owner's instructions and active skills override the
 default title format and renaming policy, so a workflow convention such as a Bean
 suffix, or renaming when the scope changes, wins over the generic rule.
 
+`compact` is bound to the calling session and accepts only optional `instructions`.
+It sends a dedicated serialized action to that session's runner, which queues one
+automated `/compact` for after the current turn and all outstanding acknowledgments.
+It never steers, interrupts, releases a hold or clears Stop. Repeated requests
+retain the first instructions and return `alreadyQueued: true`. Successful
+compaction queues an automated continuation unless the owner has stopped the chat.
+Responses include
+`queued`, `alreadyQueued`, a plain-English `message`, and `context` with `used`,
+`window` and `percent`, including on refusal. Unknown context values are null.
+Pi, unknown usage and context below `SELF_COMPACT_MIN_PERCENT` are refused with
+an MCP error result. ADR 0019 defines the scheduling and provider behavior.
+
 Ping uses the existing Runner send path, including priority now on active turns.
 It requires a client message UUID: an identical explicit retry returns the same
 accepted input, while conflicting reuse fails. The stored message identifies
