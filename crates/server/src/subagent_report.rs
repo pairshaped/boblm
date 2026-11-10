@@ -1,6 +1,6 @@
 //! Deliver durable result and error reports from a subagent to its parent (ADR 0043).
 use crate::{app::App, role_spawn};
-use boblm_store::{Store, SubagentReport};
+use boblm_store::{QuietCheck, Store, SubagentReport};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc};
 
@@ -115,6 +115,16 @@ fn build_report(store: &Store, report: &SubagentReport) -> Result<(String, Optio
     let reader = store
         .reader()
         .map_err(|error| format!("Could not read the subagent report: {error}."))?;
+    if let Some(accepted) = reader
+        .accepted_subagent_report(
+            &report.child_session,
+            report.result_seq,
+            &report_message_id(&report.child_session, report.result_seq),
+        )
+        .map_err(|error| format!("Could not read the accepted subagent report: {error}."))?
+    {
+        return Ok(accepted);
+    }
     let sessions = reader
         .sessions()
         .map_err(|error| format!("Could not read the subagent chat: {error}."))?;
@@ -190,23 +200,22 @@ fn child_quiet(status: &boblm_runner::Status) -> bool {
         && status.dispatching == 0
         && status.uncertain == 0
         && !status.queue_held
-        // Without a provider process there can be no jobs. A running provider must
-        // prove an empty inventory, matching the runner's quiet-stop rule.
-        && status.jobs.as_ref().map_or(!status.running, |jobs| {
-            jobs.available && jobs.tasks.is_empty()
-        })
 }
 
 impl App {
     /// Deliver error reports immediately and result reports once the child is quiet. The
     /// durable outbox and source-event UUID prevent duplicate parent input after a restart.
     pub(crate) async fn deliver_subagent_reports(self: &Arc<Self>) {
-        let store = self.store.clone();
         let now = crate::schedule::now_ms();
+        self.deliver_subagent_reports_at(now).await;
+    }
+
+    async fn deliver_subagent_reports_at(self: &Arc<Self>, now: i64) {
+        let store = self.store.clone();
         let Ok(Ok(reports)) = tokio::task::spawn_blocking(move || {
             // A result that landed after the last delivery with no new text repeats it.
             store.supersede_repeated_subagent_reports(now)?;
-            store.reader()?.pending_subagent_reports()
+            store.reader()?.due_subagent_reports(now)
         })
         .await
         else {
@@ -223,25 +232,21 @@ impl App {
             *seq = (*seq).max(report.result_seq);
         }
         for (child, seq) in &newest {
-            if reports.iter().any(|r| {
-                r.source_kind == "result" && &r.child_session == child && r.result_seq < *seq
-            }) {
-                let store = self.store.clone();
-                let (child, seq) = (child.clone(), *seq);
-                let now = crate::schedule::now_ms();
-                if let Err(error) = tokio::task::spawn_blocking(move || {
-                    store.supersede_older_subagent_reports(&child, seq, now)
-                })
-                .await
-                .unwrap_or_else(|error| Err(boblm_store::Error::Io(std::io::Error::other(error))))
-                {
-                    eprintln!(
-                        "Older subagent reports could not be marked superseded: {error}. They stay pending and the server will try again."
-                    );
-                    return;
-                }
+            let store = self.store.clone();
+            let (child, seq) = (child.clone(), *seq);
+            if let Err(error) = tokio::task::spawn_blocking(move || {
+                store.supersede_older_subagent_reports(&child, seq, now)
+            })
+            .await
+            .unwrap_or_else(|error| Err(boblm_store::Error::Io(std::io::Error::other(error))))
+            {
+                eprintln!(
+                    "Older subagent reports could not be marked superseded: {error}. They stay pending and the server will try again."
+                );
+                return;
             }
         }
+
         for report in reports.into_iter().filter(|report| {
             report.source_kind != "result" || newest[&report.child_session] == report.result_seq
         }) {
@@ -257,27 +262,56 @@ impl App {
                 if !child_quiet(&status) {
                     continue;
                 }
+                let child = report.child_session.clone();
+                let seq = report.result_seq;
+                let check = self
+                    .blocking("check the subagent's background jobs", move |store| {
+                        let check = store.reader()?.job_quiet_check(
+                            &child,
+                            status.running,
+                            status.jobs.as_ref(),
+                            now,
+                        )?;
+                        if let QuietCheck::RecentJobsUntil(until) = check
+                            && let Some(jobs) = status.jobs.as_ref()
+                        {
+                            store.defer_subagent_report(&child, seq, until, jobs)?;
+                        }
+                        Ok(check)
+                    })
+                    .await;
+                if !matches!(check, Ok(QuietCheck::Quiet)) {
+                    continue;
+                }
             }
             let store = self.store.clone();
             let report_for_build = report.clone();
-            let (content, text_seq) =
-                match tokio::task::spawn_blocking(move || build_report(&store, &report_for_build))
-                    .await
-                {
-                    Ok(Ok(content)) => content,
-                    Ok(Err(error)) => {
-                        self.fail_report(&report, &error).await;
-                        continue;
-                    }
-                    Err(error) => {
-                        self.fail_report(
-                            &report,
-                            &format!("The report could not be built: {error}."),
-                        )
+            let (content, text_seq) = match tokio::task::spawn_blocking(move || {
+                let (content, text_seq) = build_report(&store, &report_for_build)?;
+                store
+                    .remember_subagent_report_text_seq(
+                        &report_for_build.child_session,
+                        report_for_build.result_seq,
+                        text_seq,
+                    )
+                    .map_err(|error| {
+                        format!("Could not save the subagent report's text cursor: {error}.")
+                    })?;
+                Ok::<_, String>((content, text_seq))
+            })
+            .await
+            {
+                Ok(Ok(content)) => content,
+                Ok(Err(error)) => {
+                    self.fail_report(&report, &error).await;
+                    continue;
+                }
+                Err(error) => {
+                    self.fail_report(&report, &format!("The report could not be built: {error}."))
                         .await;
-                        continue;
-                    }
-                };
+                    continue;
+                }
+            };
             let id = report_message_id(&report.child_session, report.result_seq);
             let parent = match self.handle(&report.parent_session).await {
                 Ok(parent) => parent,
@@ -383,6 +417,11 @@ mod tests {
     }
     #[async_trait]
     impl Driver for Fake {
+        fn wakes_itself_on_background_job_completion(&self) -> bool {
+            // This harness models Claude, which supplies its own completion wake.
+            true
+        }
+
         async fn send(
             &mut self,
             uuid: &str,
@@ -608,6 +647,30 @@ mod tests {
                 on_send,
             }
         }
+        async fn jobs(&self, snapshot: &boblm_protocol::jobs::JobSnapshot, first_seen: i64) {
+            self.store
+                .record_event(
+                    &self.child,
+                    "agent_event",
+                    json!({"type":"background_jobs", "snapshot":snapshot}),
+                    first_seen,
+                )
+                .unwrap();
+            self.child_events
+                .send(Event::BackgroundJobs {
+                    snapshot: snapshot.clone(),
+                })
+                .unwrap();
+            let handle = self.app.handle_for_tests(&self.child).await;
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                while handle.status().await.unwrap().jobs.as_ref() != Some(snapshot) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+
         fn result(&self) -> i64 {
             self.result_saying("All done from the worker.")
         }
@@ -901,6 +964,332 @@ mod tests {
         let (text, _) = build_report(&h.store, &report).unwrap();
         assert!(text.contains("finished. Its result follows"));
         assert!(!text.contains("tokens-per-minute rate limit"));
+    }
+
+    #[tokio::test]
+    async fn a_report_delivers_with_a_long_lived_job() {
+        let mut h = Harness::new().await;
+        let snapshot = boblm_protocol::jobs::JobSnapshot {
+            available: true,
+            tasks: vec![boblm_protocol::jobs::BackgroundJob {
+                id: "docs-server".into(),
+                command: "serve docs".into(),
+                agent_key: None,
+            }],
+        };
+        h.jobs(
+            &snapshot,
+            crate::schedule::now_ms()
+                - boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64
+                - 1,
+        )
+        .await;
+        h.result();
+        h.app.deliver_subagent_reports().await;
+        assert_eq!(
+            h.store.reader().unwrap().subagent_reports().unwrap()[0].state,
+            "delivered"
+        );
+        assert!(
+            h.inputs
+                .recv()
+                .await
+                .unwrap()
+                .1
+                .contains("All done from the worker.")
+        );
+        h.app.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn recent_jobs_defer_until_the_youngest_ages_out_and_restart_delivers_once() {
+        let mut h = Harness::new().await;
+        let now = crate::schedule::now_ms();
+        let window = boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64;
+        let job = |id: &str| boblm_protocol::jobs::BackgroundJob {
+            id: id.into(),
+            command: "serve docs".into(),
+            agent_key: None,
+        };
+        let mut snapshot = boblm_protocol::jobs::JobSnapshot {
+            available: true,
+            tasks: vec![job("old"), job("older-recent")],
+        };
+        h.jobs(
+            &boblm_protocol::jobs::JobSnapshot {
+                available: true,
+                tasks: vec![job("old")],
+            },
+            now - window - 1,
+        )
+        .await;
+        h.jobs(&snapshot, now - 10).await;
+        snapshot.tasks.push(job("youngest"));
+        h.jobs(&snapshot, now).await;
+        let seq = h.result();
+        h.app.deliver_subagent_reports_at(now).await;
+        let reopened = Store::open(h.store.path()).unwrap();
+        assert_eq!(
+            reopened
+                .reader()
+                .unwrap()
+                .pending_subagent_reports()
+                .unwrap()[0]
+                .state,
+            "pending"
+        );
+        assert!(
+            reopened
+                .reader()
+                .unwrap()
+                .due_subagent_reports(now + window)
+                .unwrap()
+                .is_empty()
+        );
+        // Repeated observations, even in a different order, cannot cause per-tick retries.
+        snapshot.tasks.reverse();
+        h.jobs(&snapshot, now + 1).await;
+        assert!(
+            reopened
+                .reader()
+                .unwrap()
+                .due_subagent_reports(now + window)
+                .unwrap()
+                .is_empty()
+        );
+        h.app.deliver_subagent_reports_at(now + window).await;
+        assert!(h.inputs.try_recv().is_err());
+        let deadline = now + window + 1;
+        assert_eq!(
+            reopened
+                .reader()
+                .unwrap()
+                .due_subagent_reports(deadline)
+                .unwrap()[0]
+                .result_seq,
+            seq
+        );
+        h.app.deliver_subagent_reports_at(deadline).await;
+        let (id, content, _) = h.inputs.recv().await.unwrap();
+        assert_eq!(id, report_message_id(&h.child, seq));
+        assert!(content.contains("All done from the worker."));
+        h._events
+            .send(Event::CommandLifecycle {
+                command_uuid: id.clone(),
+                state: boblm_protocol::LifecycleState::Started,
+            })
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while reopened
+                .reader()
+                .unwrap()
+                .messages("parent", 0, i64::MAX)
+                .unwrap()[0]
+                .delivery_state
+                != "started"
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // Lose only outbox settlement, as a web restart between handoff and marking it would.
+        let db = rusqlite::Connection::open(h.store.path()).unwrap();
+        db.execute("UPDATE subagent_reports SET state = 'pending'", [])
+            .unwrap();
+        db.execute(
+            "UPDATE sessions SET name = 'Renamed after acceptance' WHERE id = ?1",
+            [&h.child],
+        )
+        .unwrap();
+        h.app.deliver_subagent_reports_at(deadline).await;
+        assert_eq!(
+            reopened.reader().unwrap().subagent_reports().unwrap()[0].state,
+            "delivered"
+        );
+        assert_eq!(
+            reopened
+                .reader()
+                .unwrap()
+                .messages("parent", 0, i64::MAX)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(h.inputs.try_recv().is_err());
+        h.app.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_recent_job_finishing_early_releases_a_deferred_report() {
+        for remaining_old_job in [false, true] {
+            let mut h = Harness::new().await;
+            let now = crate::schedule::now_ms();
+            let mut snapshot = boblm_protocol::jobs::JobSnapshot {
+                available: true,
+                tasks: vec![boblm_protocol::jobs::BackgroundJob {
+                    id: "old".into(),
+                    command: "serve".into(),
+                    agent_key: None,
+                }],
+            };
+            h.jobs(
+                &snapshot,
+                now - boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64 - 1,
+            )
+            .await;
+            snapshot.tasks.push(boblm_protocol::jobs::BackgroundJob {
+                id: "recent".into(),
+                command: "build".into(),
+                agent_key: None,
+            });
+            h.jobs(&snapshot, now).await;
+            h.result();
+            h.app.deliver_subagent_reports_at(now).await;
+            assert!(
+                h.store
+                    .reader()
+                    .unwrap()
+                    .due_subagent_reports(now)
+                    .unwrap()
+                    .is_empty()
+            );
+            snapshot.tasks.pop();
+            if !remaining_old_job {
+                snapshot.tasks.clear();
+            }
+            h.jobs(&snapshot, now + 1).await;
+            assert_eq!(
+                h.store
+                    .reader()
+                    .unwrap()
+                    .due_subagent_reports(now)
+                    .unwrap()
+                    .len(),
+                1
+            );
+            h.app.deliver_subagent_reports_at(now + 1).await;
+            assert!(
+                h.inputs
+                    .recv()
+                    .await
+                    .unwrap()
+                    .1
+                    .contains("All done from the worker.")
+            );
+            h.app.deliver_subagent_reports_at(i64::MAX).await;
+            assert!(h.inputs.try_recv().is_err());
+            h.app.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn old_jobs_still_require_an_available_inventory_and_known_ages() {
+        for unknown_age in [false, true] {
+            let mut h = Harness::new().await;
+            let now = crate::schedule::now_ms();
+            let mut snapshot = boblm_protocol::jobs::JobSnapshot {
+                available: true,
+                tasks: vec![boblm_protocol::jobs::BackgroundJob {
+                    id: "server".into(),
+                    command: "serve".into(),
+                    agent_key: None,
+                }],
+            };
+            h.jobs(
+                &snapshot,
+                now - boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64 - 1,
+            )
+            .await;
+            if !unknown_age {
+                snapshot.available = false;
+                h.jobs(&snapshot, now).await;
+            }
+            h.result();
+            if unknown_age {
+                rusqlite::Connection::open(h.store.path())
+                    .unwrap()
+                    .execute("DELETE FROM idle_nudge_jobs", [])
+                    .unwrap();
+            }
+            h.app.deliver_subagent_reports_at(now).await;
+            h.app.deliver_subagent_reports_at(i64::MAX).await;
+            assert_eq!(
+                h.store.reader().unwrap().subagent_reports().unwrap()[0].state,
+                "pending"
+            );
+            assert!(h.inputs.try_recv().is_err());
+            h.app.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn an_inventory_change_before_deferral_cannot_hide_an_early_completion() {
+        let h = Harness::new().await;
+        let now = crate::schedule::now_ms();
+        let mut snapshot = boblm_protocol::jobs::JobSnapshot {
+            available: true,
+            tasks: vec![boblm_protocol::jobs::BackgroundJob {
+                id: "build".into(),
+                command: "build docs".into(),
+                agent_key: None,
+            }],
+        };
+        h.jobs(&snapshot, now).await;
+        let seq = h.result();
+        let stale = snapshot.clone();
+        snapshot.tasks.clear();
+        h.jobs(&snapshot, now + 1).await;
+        h.store
+            .defer_subagent_report(
+                &h.child,
+                seq,
+                now + boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64 + 1,
+                &stale,
+            )
+            .unwrap();
+        assert_eq!(
+            h.store.reader().unwrap().due_subagent_reports(now).unwrap()[0].result_seq,
+            seq
+        );
+        h.app.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_new_result_supersedes_a_deferred_report() {
+        let mut h = Harness::new().await;
+        let now = crate::schedule::now_ms();
+        let snapshot = boblm_protocol::jobs::JobSnapshot {
+            available: true,
+            tasks: vec![boblm_protocol::jobs::BackgroundJob {
+                id: "server".into(),
+                command: "serve".into(),
+                agent_key: None,
+            }],
+        };
+        h.jobs(&snapshot, now).await;
+        h.result();
+        h.app.deliver_subagent_reports_at(now).await;
+        h.result_saying("A newer final answer.");
+        h.app.deliver_subagent_reports_at(now).await;
+        h.app
+            .deliver_subagent_reports_at(
+                now + boblm_tuning::IDLE_NUDGE_RECENT_JOB_WINDOW.as_millis() as i64 + 1,
+            )
+            .await;
+        assert!(
+            h.inputs
+                .recv()
+                .await
+                .unwrap()
+                .1
+                .contains("A newer final answer.")
+        );
+        let reports = h.store.reader().unwrap().subagent_reports().unwrap();
+        assert_eq!(reports[0].state, "superseded");
+        assert_eq!(reports[1].state, "delivered");
+        assert!(h.inputs.try_recv().is_err());
+        h.app.shutdown().await.unwrap();
     }
 
     #[tokio::test]

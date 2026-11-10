@@ -144,7 +144,7 @@ struct SpawnArgs {
     effort: Option<String>,
     /// implementer, reviewer or planner. An alternative to model and effort.
     role: Option<String>,
-    /// simple or hard, required for an implementer role and invalid for a reviewer or planner.
+    /// Required only for implementers. Default to simple (medium effort). Use hard only for clearly complex concurrency, delivery, state machines, payments, auth, credentials, risky migrations or cross-module design.
     difficulty: Option<String>,
     /// The project to create the chat in, from list_projects. Omit or null for your own project.
     project_id: Option<String>,
@@ -159,7 +159,7 @@ struct SpawnSubagentArgs {
     message: String,
     /// implementer, reviewer or planner.
     role: String,
-    /// simple or hard, required for an implementer and invalid for a reviewer or planner.
+    /// Required only for implementers. Default to simple (medium effort). Use hard only for clearly complex concurrency, delivery, state machines, payments, auth, credentials, risky migrations or cross-module design.
     difficulty: Option<String>,
     /// Optional folder inside your project. Defaults to your working folder.
     working_directory: Option<String>,

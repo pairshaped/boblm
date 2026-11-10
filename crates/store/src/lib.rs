@@ -185,6 +185,7 @@ pub use peer_spawns::PeerSpawn;
 pub use projects::{Project, default_name as default_project_name};
 pub use questions::Question;
 
+pub use idle_nudges::QuietCheck;
 pub use schedules::{NewSchedule, Outcome as ScheduleOutcome, Schedule};
 pub use secrets::{Claim as SecretClaim, NewSecretRequest, SecretRequest};
 pub use session_list::{SessionListRecord, SessionListSnapshot};

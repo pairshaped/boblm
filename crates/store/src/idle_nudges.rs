@@ -6,6 +6,17 @@ use crate::{Reader, Result, Store};
 pub use sql::{DueRow as IdleNudge, InputsRow as IdleNudgeInput};
 
 impl Reader {
+    /// Shared job-age rule for idle nudges and subagent result reports.
+    pub fn job_quiet_check(
+        &self,
+        session: &str,
+        running: bool,
+        jobs: Option<&boblm_protocol::jobs::JobSnapshot>,
+        now: i64,
+    ) -> Result<QuietCheck> {
+        jobs_quiet(&self.conn, session, running, jobs, now)
+    }
+
     /// Only recent listed jobs count as future wakes for idle nudges (ADR 0046).
     pub fn idle_nudge_jobs_quiet(
         &self,
@@ -161,7 +172,8 @@ impl Store {
     }
 }
 
-enum QuietCheck {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuietCheck {
     Quiet,
     RecentJobsUntil(i64),
     Blocked,

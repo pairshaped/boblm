@@ -70,8 +70,9 @@ BobLM stores first-seen times in `idle_nudge_jobs`, keyed by chat and job ID.
 An event trigger records the first observation in an inventory event or actor
 summary. Repeated inventories do not renew the window. A job that disappears and
 reappears with the same ID keeps its original time until its chat is deleted.
-These ages apply only to idle nudges. Subagent report checks, the runner's quiet
-stop and job-completion notices keep their ordinary job rules.
+Idle nudges and subagent result reports (ADR 0036) share these ages and the same
+job-age helper. The runner's quiet stop and job-completion notices keep their
+ordinary job rules.
 
 Open children must have no active or stopping turn, queued or dispatching input,
 or recent listed jobs. An idle child held while waiting for its parent does not

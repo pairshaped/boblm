@@ -74,6 +74,151 @@ pub fn pending(conn: &Connection) -> Result<Vec<PendingRow>> {
 }
 
 #[derive(Debug)]
+pub struct DueParams {
+    pub now: i64,
+}
+
+const DUE_SQL: &str = r"SELECT child_session, result_seq, parent_session, state, error, created_at, delivered_at, source_kind, error_message
+FROM subagent_reports WHERE state = 'pending' AND recheck_at IS NULL
+UNION ALL
+SELECT child_session, result_seq, parent_session, state, error, created_at, delivered_at, source_kind, error_message
+FROM subagent_reports WHERE state = 'pending' AND recheck_at <= ?1
+ORDER BY created_at, child_session, result_seq";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DueRow {
+    pub child_session: String,
+    pub result_seq: i64,
+    pub parent_session: String,
+    pub state: String,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub delivered_at: Option<i64>,
+    pub source_kind: String,
+    pub error_message: Option<String>,
+}
+
+pub fn due(conn: &Connection, params: DueParams) -> Result<Vec<DueRow>> {
+    let mut stmt = conn.prepare_cached(DUE_SQL)?;
+    let rows = stmt.query_map(params![params.now], |row| {
+        Ok(DueRow {
+            child_session: row.get(0)?,
+            result_seq: row.get(1)?,
+            parent_session: row.get(2)?,
+            state: row.get(3)?,
+            error: row.get(4)?,
+            created_at: row.get(5)?,
+            delivered_at: row.get(6)?,
+            source_kind: row.get(7)?,
+            error_message: row.get(8)?,
+        })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug)]
+pub struct LatestInventoryParams<'a> {
+    pub child_session: &'a str,
+}
+
+const LATEST_INVENTORY_SQL: &str = r"SELECT CAST(CASE WHEN kind = 'state_summary' THEN json_extract(payload, '$.jobs')
+ ELSE json_extract(payload, '$.snapshot') END AS TEXT) AS jobs
+FROM events WHERE session = ?1
+ AND (kind = 'state_summary' OR (kind = 'agent_event' AND json_extract(payload, '$.type') = 'background_jobs'))
+ORDER BY seq DESC LIMIT 1";
+
+pub fn latest_inventory(
+    conn: &Connection,
+    params: LatestInventoryParams<'_>,
+) -> Result<Vec<Option<String>>> {
+    let mut stmt = conn.prepare_cached(LATEST_INVENTORY_SQL)?;
+    let rows = stmt.query_map(params![params.child_session], |row| row.get(0))?;
+    rows.collect()
+}
+
+#[derive(Debug)]
+pub struct DeferParams<'a> {
+    pub recheck_at: Option<i64>,
+    pub recheck_jobs: Option<&'a str>,
+    pub child_session: &'a str,
+    pub result_seq: i64,
+}
+
+const DEFER_SQL: &str = r"UPDATE subagent_reports SET recheck_at = ?1, recheck_jobs = ?2
+WHERE child_session = ?3 AND result_seq = ?4 AND state = 'pending'";
+
+pub fn defer(conn: impl MutationConnection, params: DeferParams<'_>) -> Result<usize> {
+    let conn = conn.as_connection();
+    conn.execute(
+        DEFER_SQL,
+        params![
+            params.recheck_at,
+            params.recheck_jobs,
+            params.child_session,
+            params.result_seq
+        ],
+    )
+}
+
+#[derive(Debug)]
+pub struct AcceptedDeliveryParams<'a> {
+    pub message_id: &'a str,
+    pub child_session: &'a str,
+    pub result_seq: i64,
+}
+
+const ACCEPTED_DELIVERY_SQL: &str = r"SELECT m.content, r.delivered_text_seq
+FROM subagent_reports r JOIN messages m ON m.session = r.parent_session AND m.uuid = ?1
+WHERE r.child_session = ?2 AND r.result_seq = ?3
+ AND EXISTS (SELECT 1 FROM events e WHERE e.session = r.parent_session AND e.kind = 'message_appended'
+  AND json_extract(e.payload, '$.uuid') = m.uuid
+  AND json_extract(e.payload, '$.sender_session_id') = r.child_session)";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AcceptedDeliveryRow {
+    pub content: String,
+    pub delivered_text_seq: Option<i64>,
+}
+
+pub fn accepted_delivery(
+    conn: &Connection,
+    params: AcceptedDeliveryParams<'_>,
+) -> Result<Vec<AcceptedDeliveryRow>> {
+    let mut stmt = conn.prepare_cached(ACCEPTED_DELIVERY_SQL)?;
+    let rows = stmt.query_map(
+        params![params.message_id, params.child_session, params.result_seq],
+        |row| {
+            Ok(AcceptedDeliveryRow {
+                content: row.get(0)?,
+                delivered_text_seq: row.get(1)?,
+            })
+        },
+    )?;
+    rows.collect()
+}
+
+#[derive(Debug)]
+pub struct RememberTextSeqParams<'a> {
+    pub text_seq: Option<i64>,
+    pub child_session: &'a str,
+    pub result_seq: i64,
+}
+
+const REMEMBER_TEXT_SEQ_SQL: &str = r"UPDATE subagent_reports SET delivered_text_seq = ?1
+WHERE child_session = ?2 AND result_seq = ?3 AND state = 'pending'";
+
+pub fn remember_text_seq(
+    conn: impl MutationConnection,
+    params: RememberTextSeqParams<'_>,
+) -> Result<usize> {
+    let conn = conn.as_connection();
+    conn.execute(
+        REMEMBER_TEXT_SEQ_SQL,
+        params![params.text_seq, params.child_session, params.result_seq],
+    )
+}
+
+#[derive(Debug)]
 pub struct MarkDeliveredParams<'a> {
     pub delivered_at: Option<i64>,
     pub delivered_text_seq: Option<i64>,

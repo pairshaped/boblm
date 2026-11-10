@@ -30,11 +30,30 @@ A result event from a chat with a parent queues one row in the durable
 `subagent_reports` outbox. The trigger records the child, the result event
 sequence and the parent, so an old runner that has not restarted still queues
 reports. The scheduler delivers a pending report only while the child is quiet:
-its turn has ended, it has no background jobs, and nothing is queued, dispatching,
+its turn has ended, it is not stopping, and nothing is queued, dispatching,
 uncertain or held. A child with no provider process has no jobs. A running
-provider must report an available, empty job inventory; unknown or unavailable
-job state leaves the report pending. Pi has no background job tool, so its
-inventory starts available and empty, as Claude's does. A restart leaves the row pending; it is not lost.
+provider must report an available job inventory. The shared job-age check from
+ADR 0046 uses durable first-seen times in `idle_nudge_jobs`: a listed job blocks
+only within `IDLE_NUDGE_RECENT_JOB_WINDOW` (30 minutes), including the exact
+boundary. Unknown ages and unavailable inventories leave the report pending.
+Long-lived servers therefore cannot hold a final reply indefinitely. Pi has no
+background job tool, so its inventory starts available and empty, as Claude's does.
+
+When recent jobs are the only blockers, the report stores `recheck_at` one
+millisecond after the youngest blocking job's window ends and saves the checked
+inventory in `recheck_jobs`. An index keeps deferred reports out of scheduler
+reads until that deadline. Changed job IDs or availability clear the deadline
+through an event trigger, so a job finishing early permits delivery on the next
+scheduler pass. Repeated inventories, including reordered job lists, do not
+clear it. Deferral takes the write lock and checks the latest durable inventory
+against the serialized status, so an intervening completion cannot be hidden by
+a stale deadline. Newer results supersede older pending reports even while the
+older report is deferred. Deadlines and job ages survive a web restart; the same
+source-event UUID still prevents duplicate parent input.
+
+The shared appended prompt tells agents to stop servers and other long-running
+processes they started before a final reply, unless their brief says to leave them
+running.
 
 The report is rebuilt at delivery time from the child's latest assistant text, so
 it reflects the final stored answer rather than a copy captured earlier. Oversized
@@ -45,7 +64,10 @@ reply is needed, reuse the subagent with `ping_peer`, or archive it when done.
 Delivery uses the ordinary peer send path with the child as the recorded sender and
 a UUID derived from the child session and result event sequence. It wakes an idle
 parent and steers a busy one; a restart after the message was stored resolves to the
-same message instead of adding another. A send error marks the row failed with the
+same message instead of adding another. Before handoff, BobLM saves the assistant
+text cursor. A retry reuses the parent's accepted content and that cursor, so
+changed roster names or idle times cannot turn the duplicate into a text conflict.
+A send error marks the row failed with the
 plain-English cause and records a `subagent_report_failed` event in the child's
 history. Failed and uncertain deliveries are never replayed automatically.
 

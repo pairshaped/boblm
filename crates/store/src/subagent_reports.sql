@@ -7,6 +7,37 @@ SELECT child_session, result_seq, parent_session, state, error, created_at, deli
 FROM subagent_reports WHERE state = 'pending'
 ORDER BY created_at, child_session, result_seq;
 
+-- func: due
+SELECT child_session, result_seq, parent_session, state, error, created_at, delivered_at, source_kind, error_message
+FROM subagent_reports WHERE state = 'pending' AND recheck_at IS NULL
+UNION ALL
+SELECT child_session, result_seq, parent_session, state, error, created_at, delivered_at, source_kind, error_message
+FROM subagent_reports WHERE state = 'pending' AND recheck_at <= @now
+ORDER BY created_at, child_session, result_seq;
+
+-- func: latest_inventory
+SELECT CAST(CASE WHEN kind = 'state_summary' THEN json_extract(payload, '$.jobs')
+ ELSE json_extract(payload, '$.snapshot') END AS TEXT) AS jobs
+FROM events WHERE session = @child_session
+ AND (kind = 'state_summary' OR (kind = 'agent_event' AND json_extract(payload, '$.type') = 'background_jobs'))
+ORDER BY seq DESC LIMIT 1;
+
+-- func: defer
+UPDATE subagent_reports SET recheck_at = @recheck_at, recheck_jobs = @recheck_jobs
+WHERE child_session = @child_session AND result_seq = @result_seq AND state = 'pending';
+
+-- func: accepted_delivery
+SELECT m.content, r.delivered_text_seq
+FROM subagent_reports r JOIN messages m ON m.session = r.parent_session AND m.uuid = @message_id
+WHERE r.child_session = @child_session AND r.result_seq = @result_seq
+ AND EXISTS (SELECT 1 FROM events e WHERE e.session = r.parent_session AND e.kind = 'message_appended'
+  AND json_extract(e.payload, '$.uuid') = m.uuid
+  AND json_extract(e.payload, '$.sender_session_id') = r.child_session);
+
+-- func: remember_text_seq
+UPDATE subagent_reports SET delivered_text_seq = @text_seq
+WHERE child_session = @child_session AND result_seq = @result_seq AND state = 'pending';
+
 -- func: mark_delivered
 UPDATE subagent_reports SET state = 'delivered', error = NULL, delivered_at = @delivered_at,
  delivered_text_seq = @delivered_text_seq

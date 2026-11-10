@@ -23,7 +23,10 @@ one on their own initiative or because a workflow or skill says to plan. This is
 agent guidance, not a server check: BobLM cannot determine who requested it.
 
 
-Implementers take a difficulty of `simple` or `hard`:
+Implementers take a difficulty of `simple` or `hard`. Default to `simple` (medium
+effort). Use `hard` only when the task is clearly complex: concurrency, delivery
+or state-machine logic, payments, auth or credentials, risky migrations, or subtle
+cross-module design. The routing order is:
 
 1. Sol on the Codex plan allowance, medium or high.
 2. Sol on the Codex plan credits while the balance is positive, medium or high.
