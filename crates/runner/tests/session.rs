@@ -3853,3 +3853,49 @@ async fn self_compact_continuation_requires_success_and_preserves_stop() {
         runner.shutdown().await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn benign_claude_restart_keeps_the_turn_active_until_real_result() {
+    let mut h = Harness::new();
+    let runner = h.start().await;
+    let client = runner.handle();
+    client.send(A, "first message").await.unwrap();
+    h.input().await;
+    h.lifecycle(A, LifecycleState::Started);
+    wait_status(&client, |s| s.dispatching == 0 && s.turn_active).await;
+    h.events
+        .send(Event::ClaudeTurnRestart {
+            result: serde_json::json!({"type":"result", "is_error":true,
+            "subtype":"error_during_execution", "errors":["[ede_diagnostic] result_type=user"]}),
+        })
+        .unwrap();
+    // A following assistant event provides a durable barrier after the restart.
+    h.events
+        .send(Event::Assistant {
+            message: serde_json::json!({"content":[{"type":"text", "text":"Restart continued"}]}),
+        })
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let events = h
+                .store
+                .reader()
+                .unwrap()
+                .events_since("s", 0, 1000)
+                .unwrap();
+            if events
+                .iter()
+                .any(|event| event.payload.contains("Restart continued"))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(client.status().await.unwrap().turn_active);
+    h.result();
+    wait_status(&client, |s| !s.turn_active).await;
+    runner.shutdown().await.unwrap();
+}

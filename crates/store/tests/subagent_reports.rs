@@ -187,3 +187,46 @@ fn old_runner_event_sql_queues_errors_and_result_defaults_after_the_error_migrat
         [&id],
     ).unwrap();
 }
+
+#[test]
+fn benign_restart_does_not_queue_reports_but_execution_errors_do() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("reports.sqlite")).unwrap();
+    let id = child(&store);
+    store
+        .record_event(
+            &id,
+            "agent_event",
+            json!({"type":"claude_turn_restart", "result":{
+        "type":"result", "is_error":true, "subtype":"error_during_execution",
+        "errors":["[ede_diagnostic] result_type=user"]}}),
+            3,
+        )
+        .unwrap();
+    assert!(
+        store
+            .reader()
+            .unwrap()
+            .pending_subagent_reports()
+            .unwrap()
+            .is_empty()
+    );
+    store
+        .record_event(
+            &id,
+            "agent_event",
+            json!({"type":"result", "is_error":true,
+        "subtype":"error_during_execution"}),
+            4,
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .reader()
+            .unwrap()
+            .pending_subagent_reports()
+            .unwrap()
+            .len(),
+        1
+    );
+}

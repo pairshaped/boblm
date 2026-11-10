@@ -175,6 +175,15 @@ export function projectEvents(
                 : `Conversation compacted. ${agent} keeps a summary of the earlier messages.`,
         });
       }
+      if (raw.type === "claude_turn_restart") {
+        put({
+          key: `marker:${e.seq}`,
+          role: "marker",
+          seq: e.seq,
+          revision,
+          text: "Claude restarted its turn to include your new message",
+        });
+      }
       if (raw.type === "stream_event") {
         const event = raw.event as Record<string, unknown> | undefined;
         if (!event || typeof event !== "object" || Array.isArray(event))

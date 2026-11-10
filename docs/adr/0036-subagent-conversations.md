@@ -132,3 +132,10 @@ earlier request and asks again.
 A consumed BobLM subagent report can qualify its parent for one idle nudge after
 the parent ends that turn (ADR 0046). Pending reports and mid-turn children
 suppress the nudge; subagent result events never create their own opportunities.
+
+Claude's `error_during_execution` result is a benign restart only when its sole
+error starts with `[ede_diagnostic] result_type=user` and the attempt produced no
+assistant or streaming output. BobLM stores the untouched result inside a
+`claude_turn_restart` event and shows a muted note. This event leaves the turn
+running and creates neither a subagent report nor an idle-nudge completion. All
+other execution errors retain their normal handling.

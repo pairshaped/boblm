@@ -294,6 +294,7 @@ impl ClaudeSession {
             let mut probes = usage::Probes::default();
             let mut background_tasks = background::BackgroundTasks::default();
             let mut usage_ready = false;
+            let mut attempt = Attempt::default();
             let mut usage_tick = tokio::time::interval(boblm_tuning::USAGE_POLL_INTERVAL);
             usage_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut drain_until = None;
@@ -335,6 +336,12 @@ impl ClaudeSession {
                     Ok(Some(Line::Text(bytes))) => {
                         match serde_json::from_slice::<serde_json::Value>(&bytes) {
                             Ok(value) => {
+                                if let Some(restart) = attempt.observe(&value) {
+                                    if tx.send(restart).await.is_err() {
+                                        break 'read;
+                                    }
+                                    continue;
+                                }
                                 let mut provider_error = provider_error_event(&value);
                                 if value["type"] == "result"
                                     && let Some(error) = provider_error.take()
@@ -731,6 +738,36 @@ impl Drop for ClaudeSession {
     }
 }
 
+/// Tracks provider output across attempts, never across individual command acknowledgments.
+#[derive(Default)]
+struct Attempt {
+    assistant_output: bool,
+}
+
+impl Attempt {
+    fn observe(&mut self, value: &serde_json::Value) -> Option<Event> {
+        if value["type"] == "result" {
+            let restart = !self.assistant_output
+                && value["is_error"] == true
+                && value["subtype"] == "error_during_execution"
+                && value["errors"].as_array().is_some_and(|errors| {
+                    errors.len() == 1
+                        && errors[0].as_str().is_some_and(|text| {
+                            text.starts_with("[ede_diagnostic] result_type=user")
+                        })
+                });
+            self.assistant_output = false;
+            return restart.then(|| Event::ClaudeTurnRestart {
+                result: value.clone(),
+            });
+        }
+        if value["type"] == "assistant" || value["type"] == "stream_event" {
+            self.assistant_output = true;
+        }
+        None
+    }
+}
+
 /// Only Claude's error envelopes identify provider failures; ordinary answers cannot exhaust credit.
 fn provider_error_event(value: &serde_json::Value) -> Option<Event> {
     let text = if value["type"] == "assistant" && value["error"].is_string() {
@@ -786,5 +823,60 @@ mod provider_error_tests {
             );
         }
         assert!(provider_error_event(&serde_json::json!({"type":"assistant", "message":{"content":[{"type":"text","text":"Credit balance is too low"}]}})).is_none());
+    }
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::*;
+
+    fn result(text: &str) -> serde_json::Value {
+        serde_json::json!({"type":"result", "is_error":true,
+            "subtype":"error_during_execution", "errors":[text], "future":42})
+    }
+
+    #[test]
+    fn restart_requires_exact_envelope_and_no_assistant_output() {
+        let raw =
+            result("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null");
+        let Some(Event::ClaudeTurnRestart { result: stored }) = Attempt::default().observe(&raw)
+        else {
+            panic!()
+        };
+        assert_eq!(stored, raw);
+        for other in [
+            result("execution failed"),
+            result("[ede_diagnostic] result_type=assistant"),
+            {
+                let mut v = raw.clone();
+                v["is_error"] = false.into();
+                v
+            },
+            {
+                let mut v = raw.clone();
+                v["subtype"] = "other".into();
+                v
+            },
+            {
+                let mut v = raw.clone();
+                v["errors"] =
+                    serde_json::json!(["[ede_diagnostic] result_type=user", "real error"]);
+                v
+            },
+        ] {
+            assert!(Attempt::default().observe(&other).is_none());
+        }
+        for output in [
+            serde_json::json!({"type":"assistant"}),
+            serde_json::json!({"type":"stream_event"}),
+        ] {
+            let mut attempt = Attempt::default();
+            attempt.observe(&output);
+            assert!(attempt.observe(&raw).is_none());
+            assert!(
+                attempt.observe(&raw).is_some(),
+                "a result resets the attempt"
+            );
+        }
     }
 }

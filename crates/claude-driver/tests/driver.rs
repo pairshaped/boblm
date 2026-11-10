@@ -587,3 +587,30 @@ async fn claude_api_billing_errors_reach_the_runner_before_the_failed_result() {
     }
     session.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn benign_restart_emits_note_without_error_then_continues() {
+    let mut session = fake(None).await;
+    next(&mut session).await;
+    session.send("benign-restart").await.unwrap();
+    assert!(matches!(
+        next(&mut session).await,
+        Event::CommandLifecycle { .. }
+    ));
+    assert!(matches!(
+        next(&mut session).await,
+        Event::ClaudeTurnRestart { .. }
+    ));
+    let Event::Assistant { message } = next(&mut session).await else {
+        panic!()
+    };
+    assert_eq!(message["content"][0]["text"], "Both messages received");
+    assert!(matches!(
+        next(&mut session).await,
+        Event::Result {
+            is_error: Some(false),
+            ..
+        }
+    ));
+    session.stop().await.unwrap();
+}

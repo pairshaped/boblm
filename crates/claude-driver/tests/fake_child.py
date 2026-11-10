@@ -93,6 +93,12 @@ for line in sys.stdin:
             emit({"type": "assistant", "error": "billing_error", "message": {"id": "billing-error", "model": "haiku", "content": [{"type": "text", "text": "Credit balance is too low"}]}})
         emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "errors": [] if mode == "api-billing-error" else ["Credit balance is too low"]})
         continue
+    if mode == "benign-restart":
+        emit({"type": "command_lifecycle", "command_uuid": uuid, "state": "started"})
+        emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "errors": ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"]})
+        emit({"type": "assistant", "message": {"content": [{"type": "text", "text": "Both messages received"}]}})
+        emit({"type": "result", "subtype": "success", "is_error": False})
+        continue
     if mode == "block-input":
         emit({"type": "assistant", "message": {"blocked": True}})
         time.sleep(60)

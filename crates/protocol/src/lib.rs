@@ -77,6 +77,10 @@ pub enum Event {
         subtype: Option<String>,
         is_error: Option<bool>,
     },
+    /// A Claude attempt restarted before output; the original result is retained verbatim.
+    ClaudeTurnRestart {
+        result: serde_json::Value,
+    },
     BackgroundJobs {
         snapshot: jobs::JobSnapshot,
     },

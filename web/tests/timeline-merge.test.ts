@@ -135,3 +135,32 @@ test("one event holding text and a tool call still works", () => {
   assert.equal(rows[1]!.text, "Checking.");
   assert.equal(rows[1]!.tools?.length, 1);
 });
+
+test("benign Claude restart is a muted marker and the answer continues", () => {
+  const timeline = projectEvents(emptyTimeline(), [
+    {
+      sessionId: "s",
+      seq: 1,
+      createdAt: 1,
+      kind: "agent_event",
+      payload: {
+        type: "claude_turn_restart",
+        result: {
+          type: "result",
+          is_error: true,
+          errors: ["[ede_diagnostic] result_type=user"],
+        },
+      },
+    },
+    text(2, "answer", "Both messages received"),
+  ]);
+  assert.equal(timeline.rows[0]?.role, "marker");
+  assert.equal(
+    timeline.rows[0]?.text,
+    "Claude restarted its turn to include your new message",
+  );
+  assert.equal(timeline.rows[1]?.text, "Both messages received");
+  assert.ok(
+    !timeline.rows.some((row) => row.text.includes("Claude reported an error")),
+  );
+});
