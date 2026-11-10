@@ -1029,7 +1029,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_has_seven_models_with_labels_and_refuses_retired_ones() {
+    fn the_catalog_has_eight_models_with_labels_and_refuses_retired_ones() {
         let labels: Vec<_> = model_catalog()
             .into_iter()
             .map(|m| (m.model, m.label))
@@ -1038,6 +1038,7 @@ mod tests {
             labels,
             [
                 ("opus", "opus"),
+                ("fable", "fable"),
                 ("sonnet", "sonnet"),
                 ("haiku", "haiku"),
                 ("gpt-6.1-sol", "sol"),

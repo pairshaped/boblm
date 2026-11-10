@@ -101,8 +101,8 @@ and conversation changes use `agent_session_changed`.
 
 ## Model catalog and labels
 
-`MODELS` in `crates/tuning/src/lib.rs` offers exactly seven models, always the newest of
-each: opus, sonnet, haiku, sol (`gpt-6.1-sol`), terra (`gpt-6.1-terra`),
+`MODELS` in `crates/tuning/src/lib.rs` offers exactly eight models, always the newest of
+each: opus, fable (Claude Fable, currently 5.2), sonnet, haiku, sol (`gpt-6.1-sol`), terra (`gpt-6.1-terra`),
 luna (`gpt-6-luna`) and Pi-backed dsf
 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`). Each entry has a short `label` for tight places:
 the model selectors, the drawer header and tool text. Tool text shows `label (id)` where there

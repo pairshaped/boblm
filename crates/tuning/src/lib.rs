@@ -286,6 +286,8 @@ pub const MODEL_GPT_6_1_SOL: &str = "gpt-6.1-sol";
 pub const MODEL_GPT_6_1_TERRA: &str = "gpt-6.1-terra";
 /// Model ID for GPT-6 Luna, used by the reviewer API step.
 pub const MODEL_GPT_6_LUNA: &str = "gpt-6-luna";
+/// Claude Code alias for the current Claude Fable model (Fable 5.2).
+pub const MODEL_FABLE: &str = "fable";
 /// Newest Claude Haiku.
 pub const MODEL_HAIKU: &str = "haiku";
 /// Newest Claude Opus.
@@ -298,6 +300,12 @@ pub const MODELS: &[ModelSpec] = &[
     ModelSpec {
         id: MODEL_OPUS,
         label: "opus",
+        agent: "claude",
+        efforts: CLAUDE_EFFORTS,
+    },
+    ModelSpec {
+        id: MODEL_FABLE,
+        label: "fable",
         agent: "claude",
         efforts: CLAUDE_EFFORTS,
     },

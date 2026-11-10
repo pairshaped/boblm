@@ -192,6 +192,18 @@
             "xhigh",
             "max"
           ],
+          "label": "fable",
+          "model": "fable"
+        },
+        {
+          "agent": "claude",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "label": "sonnet",
           "model": "sonnet"
         },
