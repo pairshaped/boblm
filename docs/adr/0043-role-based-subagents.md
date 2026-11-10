@@ -38,8 +38,12 @@ cross-module design. The routing order is:
 Reviewers take no difficulty:
 
 1. Luna on the OpenAI API credit while API headroom is available, xhigh.
-2. Haiku on the Claude Platform API credit, high.
-3. DeepSeek V4.1 Flash 1017 through Pi, high.
+2. Luna on the Codex plan weekly allowance, xhigh, whenever the API step is
+   unavailable because of headroom, the active-reviewer cap, TPM cooldown, credit
+   exhaustion or disabled API routing. This step uses `reviewer-codex-plan`, the
+   `codex-plan` account key and normal plan exhaustion marks.
+3. Haiku on the Claude Platform API credit, high.
+4. DeepSeek V4.1 Flash 1017 through Pi, high.
 
 Every Claude plan step chooses independently among enabled accounts, draining
 the one whose weekly reset comes first until it has
@@ -54,8 +58,8 @@ remain readable. Reviewers do independent code review; implementers own
 implementation and repairs.
 
 `CODEX_PLAN_ROUTING_ENABLED` and `OPENAI_API_ROUTING_ENABLED` are documented
-tunables, both true. Disabling the first skips both Sol plan and credits steps;
-disabling the second skips Luna API reviews. The route reason names the flag,
+tunables, both true. Disabling the first skips Sol plan and credits steps and the
+Luna plan step; disabling the second skips Luna API reviews. The route reason names the flag,
 for example "disabled by CODEX_PLAN_ROUTING_ENABLED". Drivers, the model catalog
 and explicit model choices keep working. There is no settings screen (ADR 0018).
 
@@ -111,7 +115,8 @@ of the usage records contained 983 API Luna calls in the latest day, averaging
 about 742,000 tokens before counting recent completed requests. This is a spawn guard, not a guarantee against a provider rate limit;
 long reviews keep their account and may send several requests per minute.
 The route reason includes the measured number that blocked an API spawn and
-the chosen fallback. Haiku API fallback depends on credit exhaustion marks.
+the chosen fallback. Luna plan fallback requires weekly allowance and enabled
+Codex plan routing. Haiku API fallback depends on credit exhaustion marks.
 
 The role table, efforts and model IDs are constants in `crates/tuning`. The
 resolver is pure: `resolve(role, difficulty, readings, exhausted_marks, api_headroom, now)`

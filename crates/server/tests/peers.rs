@@ -2165,10 +2165,10 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
     );
     let fallback = routes
         .iter()
-        .find(|route| route["routing"]["step"] == "reviewer-claude-api")
+        .find(|route| route["routing"]["step"] == "reviewer-codex-plan")
         .unwrap();
-    assert_eq!(fallback["routing"]["model"], "haiku");
-    assert_eq!(fallback["routing"]["effort"], "high");
+    assert_eq!(fallback["routing"]["model"], boblm_tuning::MODEL_GPT_6_LUNA);
+    assert_eq!(fallback["routing"]["effort"], "xhigh");
     let saved = store
         .reader()
         .unwrap()
@@ -2179,7 +2179,7 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
         .unwrap();
     assert_eq!(
         saved.account_key.as_deref(),
-        Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A)
+        Some(boblm_tuning::CODEX_ACCOUNT_KEY_PLAN)
     );
     assert!(
         fallback["routing"]["reason"]

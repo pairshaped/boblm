@@ -101,6 +101,7 @@ pub enum StepId {
     ImplementerCodexCredits,
     ImplementerDeepSeek,
     ReviewerOpenAiApi,
+    ReviewerCodexPlan,
     ReviewerClaudeApi,
     ReviewerDeepSeek,
     PlannerClaude,
@@ -115,6 +116,7 @@ impl StepId {
             "implementer-deepseek" => Some(Self::ImplementerDeepSeek),
             "reviewer-claude-api" => Some(Self::ReviewerClaudeApi),
             "reviewer-openai-api" => Some(Self::ReviewerOpenAiApi),
+            "reviewer-codex-plan" => Some(Self::ReviewerCodexPlan),
             "reviewer-deepseek" => Some(Self::ReviewerDeepSeek),
             "planner-claude" => Some(Self::PlannerClaude),
             _ => None,
@@ -123,7 +125,9 @@ impl StepId {
 
     pub fn account(self) -> AccountKind {
         match self {
-            Self::ImplementerCodexPlan | Self::ImplementerCodexCredits => AccountKind::CodexPlan,
+            Self::ImplementerCodexPlan
+            | Self::ImplementerCodexCredits
+            | Self::ReviewerCodexPlan => AccountKind::CodexPlan,
             Self::ReviewerClaudeApi => AccountKind::ClaudeApi,
             Self::ImplementerClaude | Self::PlannerClaude => AccountKind::ClaudePlan,
             Self::ImplementerDeepSeek | Self::ReviewerDeepSeek => AccountKind::DeepSeek,
@@ -139,6 +143,7 @@ impl StepId {
             Self::ImplementerDeepSeek => "implementer-deepseek",
             Self::ReviewerClaudeApi => "reviewer-claude-api",
             Self::ReviewerOpenAiApi => "reviewer-openai-api",
+            Self::ReviewerCodexPlan => "reviewer-codex-plan",
             Self::ReviewerDeepSeek => "reviewer-deepseek",
             Self::PlannerClaude => "planner-claude",
         }
@@ -146,7 +151,7 @@ impl StepId {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::ImplementerCodexPlan => "Codex plan allowance",
+            Self::ImplementerCodexPlan | Self::ReviewerCodexPlan => "Codex plan allowance",
             Self::ImplementerClaude => "Claude plan allowance",
             Self::ImplementerCodexCredits => "Codex plan credits",
             Self::ImplementerDeepSeek => "DeepSeek fallback",
@@ -166,6 +171,7 @@ impl StepId {
                 | Self::ImplementerCodexCredits
                 | Self::ImplementerDeepSeek
                 | Self::ReviewerOpenAiApi
+                | Self::ReviewerCodexPlan
                 | Self::ReviewerClaudeApi
                 | Self::ReviewerDeepSeek
                 | Self::PlannerClaude
@@ -221,6 +227,13 @@ pub const REVIEWER_STEPS: &[RoleStep] = &[
         simple_effort: ROLE_REVIEWER_LUNA_EFFORT,
         hard_effort: ROLE_REVIEWER_LUNA_EFFORT,
         account: AccountKind::OpenAiApi,
+    },
+    RoleStep {
+        id: StepId::ReviewerCodexPlan,
+        model: MODEL_GPT_6_LUNA,
+        simple_effort: ROLE_REVIEWER_LUNA_EFFORT,
+        hard_effort: ROLE_REVIEWER_LUNA_EFFORT,
+        account: AccountKind::CodexPlan,
     },
     RoleStep {
         id: StepId::ReviewerClaudeApi,
@@ -493,7 +506,11 @@ fn resolve_with(
     let mut rejections = Vec::new();
     for step in steps(role) {
         let disabled = match step.id {
-            StepId::ImplementerCodexPlan | StepId::ImplementerCodexCredits if !codex_enabled => {
+            StepId::ImplementerCodexPlan
+            | StepId::ImplementerCodexCredits
+            | StepId::ReviewerCodexPlan
+                if !codex_enabled =>
+            {
                 Some("CODEX_PLAN_ROUTING_ENABLED")
             }
             StepId::ReviewerOpenAiApi if !openai_enabled => Some("OPENAI_API_ROUTING_ENABLED"),
@@ -542,9 +559,10 @@ fn resolve_with(
             .iter()
             .find(|reading| reading.account == step.account);
         let reason = match step.id {
-            StepId::ImplementerCodexPlan | StepId::ImplementerClaude | StepId::PlannerClaude => {
-                weekly_plan_reason(step.account, reading, now)
-            }
+            StepId::ImplementerCodexPlan
+            | StepId::ReviewerCodexPlan
+            | StepId::ImplementerClaude
+            | StepId::PlannerClaude => weekly_plan_reason(step.account, reading, now),
             StepId::ImplementerCodexCredits => codex_credits_reason(reading),
             StepId::ReviewerOpenAiApi => headroom.reason(),
             StepId::ImplementerDeepSeek | StepId::ReviewerDeepSeek => Ok(format!(
@@ -679,6 +697,7 @@ mod tests {
                 Role::Reviewer,
                 vec![
                     StepId::ReviewerOpenAiApi,
+                    StepId::ReviewerCodexPlan,
                     StepId::ReviewerClaudeApi,
                     StepId::ReviewerDeepSeek,
                 ],
@@ -693,7 +712,9 @@ mod tests {
                     .iter()
                     .copied()
                     .filter(|step| match step {
-                        StepId::ImplementerCodexPlan | StepId::ImplementerCodexCredits => codex,
+                        StepId::ImplementerCodexPlan
+                        | StepId::ImplementerCodexCredits
+                        | StepId::ReviewerCodexPlan => codex,
                         StepId::ReviewerOpenAiApi => openai,
                         _ => true,
                     })
@@ -1094,12 +1115,12 @@ mod tests {
     }
 
     #[test]
-    fn reviewer_headroom_falls_back_to_claude_api() {
+    fn reviewer_headroom_falls_back_to_codex_plan() {
         let budget = (OPENAI_API_TPM_LIMIT as f64 * OPENAI_API_TPM_BUDGET) as u64;
         for (tokens, projected, active, expected) in [
             (budget - 1, 0, 0, StepId::ReviewerOpenAiApi),
-            (budget, 0, 0, StepId::ReviewerClaudeApi),
-            (budget - 1, 1, 0, StepId::ReviewerClaudeApi),
+            (budget, 0, 0, StepId::ReviewerCodexPlan),
+            (budget - 1, 1, 0, StepId::ReviewerCodexPlan),
             (
                 0,
                 0,
@@ -1110,7 +1131,7 @@ mod tests {
                 0,
                 0,
                 OPENAI_API_MAX_ACTIVE_REVIEWERS,
-                StepId::ReviewerClaudeApi,
+                StepId::ReviewerCodexPlan,
             ),
         ] {
             let RouteOutcome::Chosen(route) = resolve(
@@ -1128,10 +1149,64 @@ mod tests {
                 panic!()
             };
             assert_eq!(route.step, expected);
-            if expected == StepId::ReviewerClaudeApi {
-                assert_eq!(route.model, MODEL_HAIKU);
-                assert_eq!(route.effort, ROLE_REVIEWER_HAIKU_EFFORT);
-                assert_eq!(route.account, AccountKind::ClaudeApi);
+            if expected == StepId::ReviewerCodexPlan {
+                assert_eq!(route.model, MODEL_GPT_6_LUNA);
+                assert_eq!(route.effort, ROLE_REVIEWER_LUNA_EFFORT);
+                assert_eq!(route.account, AccountKind::CodexPlan);
+            }
+        }
+    }
+
+    #[test]
+    fn reviewer_plan_fallback_obeys_allowance_marks_and_flags() {
+        let now = 1000;
+        for (codex, openai, used, marked, haiku_marked, expected) in [
+            (true, false, 99.9, false, false, StepId::ReviewerCodexPlan),
+            (true, true, 99.9, false, false, StepId::ReviewerCodexPlan),
+            (true, true, 100.0, false, false, StepId::ReviewerClaudeApi),
+            (false, true, 0.0, false, false, StepId::ReviewerClaudeApi),
+            (true, true, 0.0, true, false, StepId::ReviewerClaudeApi),
+            (true, true, 100.0, false, true, StepId::ReviewerDeepSeek),
+        ] {
+            let mut marks = vec![ExhaustedStep {
+                step: StepId::ReviewerOpenAiApi,
+                until: now + 120,
+            }];
+            if marked {
+                marks.push(ExhaustedStep {
+                    step: StepId::ReviewerCodexPlan,
+                    until: now + 100,
+                });
+            }
+            if haiku_marked {
+                marks.push(ExhaustedStep {
+                    step: StepId::ReviewerClaudeApi,
+                    until: now + 100,
+                });
+            }
+            let RouteOutcome::Chosen(route) = resolve_with(
+                Role::Reviewer,
+                Difficulty::Simple,
+                &[reading(
+                    AccountKind::CodexPlan,
+                    Some(used),
+                    Some(now + 100),
+                    None,
+                )],
+                &marks,
+                ApiHeadroom::default(),
+                now,
+                (StepId::configured, codex, openai),
+            ) else {
+                panic!()
+            };
+            assert_eq!(route.step, expected);
+            if !codex {
+                assert!(
+                    route
+                        .reason
+                        .contains("disabled by CODEX_PLAN_ROUTING_ENABLED")
+                );
             }
         }
     }

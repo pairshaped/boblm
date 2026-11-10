@@ -231,3 +231,56 @@ fn role_spawn_receipt_keeps_the_resolved_choice_and_old_sql_still_runs() {
         .unwrap();
     assert!(resolved.is_none());
 }
+
+#[test]
+fn stored_reviewer_codex_plan_receipt_parses() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("role-spawn.sqlite");
+    let store = Store::open(&path).unwrap();
+    let project = root(&store);
+    let id = "10000000-0000-4000-8000-000000000003";
+    store
+        .spawn_peer(PeerSpawn {
+            request_id: id.into(),
+            caller: "root".into(),
+            arguments: r#"{"role":"reviewer","difficulty":"simple"}"#.into(),
+            project_id: project,
+            agent: "codex".into(),
+            model: "gpt-6-luna".into(),
+            effort: "xhigh".into(),
+            title: "Fixture chat".into(),
+            content: "work".into(),
+            created_at: 2,
+            parent_session_id: Some("root".into()),
+            root_session_id: Some("root".into()),
+            role: Some("reviewer".into()),
+            resolved: Some(
+                r#"{"role":"reviewer","difficulty":"simple","model":"gpt-6-luna","effort":"xhigh","account":"codex-plan","step":"reviewer-codex-plan","reason":"Codex has room."}"#
+                    .into(),
+            ),
+            working_directory: None,
+            account_key: Some("codex-plan".into()),
+        })
+        .unwrap();
+    let session = store
+        .reader()
+        .unwrap()
+        .sessions()
+        .unwrap()
+        .into_iter()
+        .find(|session| session.id == id)
+        .unwrap();
+    assert_eq!(session.account_key.as_deref(), Some("codex-plan"));
+    let receipt = store
+        .reader()
+        .unwrap()
+        .peer_spawn_receipt(id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(receipt.caller, "root");
+    let resolved: serde_json::Value = serde_json::from_str(&receipt.resolved.unwrap()).unwrap();
+    let step = boblm_tuning::StepId::parse(resolved["step"].as_str().unwrap()).unwrap();
+    assert_eq!(step, boblm_tuning::StepId::ReviewerCodexPlan);
+    assert_eq!(step.as_str(), "reviewer-codex-plan");
+    assert_eq!(step.account(), boblm_tuning::AccountKind::CodexPlan);
+}
