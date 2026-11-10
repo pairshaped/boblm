@@ -115,6 +115,13 @@ pub struct RunningSession {
 #[derive(Serialize, Deserialize)]
 enum Action {
     Delete,
+    PrepareDelete,
+    CancelPrepareDelete,
+    DeleteByAgent {
+        request_id: String,
+        caller: String,
+        prefix: String,
+    },
     Compact(Option<String>),
     Send(String, String, Vec<String>, Option<String>),
     SendAutomated(String, String),
@@ -125,7 +132,10 @@ enum Action {
     Archive(bool),
     Retry(String),
     SetModel(String, Option<String>),
-    Rename { name: String, only_if_unnamed: bool },
+    Rename {
+        name: String,
+        only_if_unnamed: bool,
+    },
     Shutdown,
 }
 #[derive(Serialize, Deserialize)]
@@ -257,6 +267,27 @@ impl SessionHandle {
     }
     pub async fn delete(&self) -> Result<()> {
         self.call(Action::Delete).await.map(|_| ())
+    }
+    /// Stop a cascade member before the root atomically removes its rows.
+    pub async fn prepare_delete(&self) -> Result<()> {
+        self.call(Action::PrepareDelete).await.map(|_| ())
+    }
+    pub async fn cancel_prepared_deletion(&self) -> Result<()> {
+        self.call(Action::CancelPrepareDelete).await.map(|_| ())
+    }
+    pub async fn delete_by_agent(
+        &self,
+        request_id: &str,
+        caller: &str,
+        prefix: &str,
+    ) -> Result<()> {
+        self.call(Action::DeleteByAgent {
+            request_id: request_id.into(),
+            caller: caller.into(),
+            prefix: prefix.into(),
+        })
+        .await
+        .map(|_| ())
     }
     pub async fn resume(&self) -> Result<()> {
         self.call(Action::Resume).await.map(|_| ())
@@ -665,6 +696,7 @@ impl Actor {
         self.pump().await?;
         self.publish_status().await?;
         let mut clean_shutdown = false;
+        let mut deletion_prepared: Option<Status> = None;
         let mut account_check = tokio::time::interval(boblm_tuning::USAGE_POLL_INTERVAL);
         account_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -690,20 +722,65 @@ impl Actor {
                 Accounts,
             }
             let expiry = self.expiry_deadline();
-            let wake = tokio::select! {
-                _ = account_check.tick() => Wake::Accounts,
-                command = commands.recv() => Wake::Command(command),
-                event = async { match &mut self.driver { Some(driver) => driver.next_event().await, None => std::future::pending().await } } => Wake::Event(event),
-                _ = async { match deadline { Some(deadline) => tokio::time::sleep_until(deadline).await, None => std::future::pending().await } } => Wake::Deadline,
-                _ = async { match expiry { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => Wake::Expiry,
+            let wake = if deletion_prepared.is_some() {
+                tokio::select! {
+                    command = commands.recv() => Wake::Command(command),
+                    _ = account_check.tick() => {
+                        // A web crash after commit must not strand a paused runner.
+                        let id = self.id.clone();
+                        if self.db(move |store| store.reader()?.session_deleted(&id)).await? {
+                            return Ok(());
+                        }
+                        Wake::Accounts
+                    }
+                }
+            } else {
+                tokio::select! {
+                    _ = account_check.tick() => Wake::Accounts,
+                    command = commands.recv() => Wake::Command(command),
+                    event = async { match &mut self.driver { Some(driver) => driver.next_event().await, None => std::future::pending().await } } => Wake::Event(event),
+                    _ = async { match deadline { Some(deadline) => tokio::time::sleep_until(deadline).await, None => std::future::pending().await } } => Wake::Deadline,
+                    _ = async { match expiry { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => Wake::Expiry,
+                }
             };
             match wake {
                 Wake::Command(Some(command)) => {
+                    if let Some(status) = &deletion_prepared {
+                        match command.action {
+                            Action::Status => {
+                                let _ = command.reply.send(Ok(Reply::Status(status.clone())));
+                                continue;
+                            }
+                            Action::PrepareDelete => {
+                                let _ = command.reply.send(Ok(Reply::Done));
+                                continue;
+                            }
+                            Action::Delete
+                            | Action::CancelPrepareDelete
+                            | Action::Shutdown
+                            | Action::Archive(false) => {}
+                            _ => {
+                                let _ = command.reply.send(Err(Error::Invalid("This chat is being deleted. Wait for deletion to finish before sending another command.".into())));
+                                continue;
+                            }
+                        }
+                    }
+                    let preparing = matches!(command.action, Action::PrepareDelete);
+                    deletion_prepared = None;
                     let shutdown = matches!(command.action, Action::Shutdown);
-                    let deleting = matches!(command.action, Action::Delete);
+                    let deleting = matches!(
+                        command.action,
+                        Action::Delete | Action::DeleteByAgent { .. }
+                    );
                     let defer_stop = matches!(command.action, Action::Stop | Action::Archive(true));
                     let result = self.execute(command.action).await;
                     let succeeded = result.is_ok();
+                    if preparing && succeeded {
+                        // Publish before acknowledging, then wait for the coordinator.
+                        // No timer may write rows while the root commits its cascade.
+                        self.publish_status().await?;
+                        deletion_prepared = Some(self.status().await?);
+                    }
                     let deleted = deleting && succeeded;
                     let fatal = matches!(&result, Err(Error::Store(error)) if !error.is_busy() && !matches!(error, boblm_store::Error::MessageConflict | boblm_store::Error::ChatDeletion(_)))
                         || matches!(&result, Err(Error::Task(_)));
@@ -754,8 +831,10 @@ impl Actor {
                     }
                 }
             }
-            self.pump().await?;
-            self.publish_status().await?;
+            if deletion_prepared.is_none() {
+                self.pump().await?;
+                self.publish_status().await?;
+            }
         }
         // Capture activity before disconnect clears it. Unknown job inventory cannot
         // prove quiet while a provider is running. Owner Stop keeps its separate hold.
@@ -808,16 +887,47 @@ impl Actor {
             Action::SendAutomated(..) | Action::SubagentResult(..) => {
                 unreachable!("completion was handled above")
             }
-            Action::Delete => {
+            Action::CancelPrepareDelete => Ok(Reply::Done),
+            Action::Delete | Action::PrepareDelete | Action::DeleteByAgent { .. } => {
+                // A root's cascade has already removed its prepared children's
+                // rows. Acknowledge their deletion so those runners exit too.
+                if matches!(action, Action::Delete) {
+                    let id = self.id.clone();
+                    if self
+                        .db(move |store| store.reader()?.session_deleted(&id))
+                        .await?
+                    {
+                        return Ok(Reply::Done);
+                    }
+                }
+                let agent = match &action {
+                    Action::DeleteByAgent {
+                        request_id,
+                        caller,
+                        prefix,
+                    } => Some((request_id.clone(), caller.clone(), prefix.clone())),
+                    _ => None,
+                };
+                let prepare_only = matches!(action, Action::PrepareDelete);
                 if !self.session().await?.archived {
-                    return Err(Error::Invalid(
-                        "Archive the chat before deleting it.".into(),
-                    ));
+                    return Err(Error::Invalid(if agent.is_some() || prepare_only {
+                        "This chat is not archived. Call archive_peer before delete_chat.".into()
+                    } else {
+                        "Archive the chat before deleting it.".into()
+                    }));
                 }
                 self.finish_stop(true).await?;
                 self.disconnect().await?;
                 let id = self.id.clone();
-                self.db(move |store| store.delete_session(&id)).await?;
+                if !prepare_only {
+                    self.db(move |store| match agent {
+                        Some((request_id, caller, prefix)) => {
+                            store.delete_session_by_agent(&id, &request_id, &caller, &prefix)
+                        }
+                        None => store.delete_session(&id),
+                    })
+                    .await?;
+                }
                 Ok(Reply::Done)
             }
             Action::Send(uuid, content, attachments, sender) => {

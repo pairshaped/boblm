@@ -5,6 +5,7 @@ mod attachments;
 mod claude_accounts;
 pub use claude_accounts::ClaudeHandoff;
 mod deletions;
+pub use deletions::AgentDeletionReceipt;
 mod events;
 mod history;
 mod idle_nudges;

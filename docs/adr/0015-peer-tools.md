@@ -69,6 +69,16 @@ chat. Archive uses the existing stop-and-archive operation, including its interr
 and bounded shutdown. Self-archive can close the caller before a reply, so tool
 instructions tell agents to inspect from another session before retrying.
 
+`delete_chat` permanently removes an archived chat's BobLM history, uploads and
+stored transcripts through the owner deletion path (ADR 0030). It accepts a full
+session ID or unique prefix and a fresh requestId UUID. The server enforces the
+caller's project boundary, refuses self-deletion and unanswered owner questions,
+and refuses roots with unarchived subagents. Archived subagents cascade with the
+root. The receipt records the deleting session and returns unchanged on an
+identical retry. The tool and appended prompt tell agents to delete only finished
+chats they no longer need. Provider transcript files remain on disk.
+
+
 Explicit-model spawn requires model and effort, and the model decides the agent
 (ADR 0023). Role-routed spawns resolve model and effort through ADR 0043. Spawn also requires a title of 1 to 200
 characters, validated like a rename, and stores it on the child in the same

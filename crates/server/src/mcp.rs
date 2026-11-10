@@ -113,6 +113,13 @@ struct ArchiveArgs {
 }
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct DeleteChatArgs {
+    session_id_prefix: String,
+    /// Fresh UUID for this deletion. Reuse only for an identical explicit retry.
+    request_id: String,
+}
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct CancelArgs {
     schedule_id: String,
 }
@@ -700,6 +707,31 @@ impl Peers {
             let session=self.resolve(&id).await?;
             self.app.archive_cascade(&session.id, true).await.map_err(|e|e.to_string())?;
             Ok(serde_json::json!({"sessionId":session.id,"archived":true,"historyRetained":true}))
+        }.await)
+    }
+    #[tool(
+        description = "Permanently delete an archived chat in your project by full ID or unique prefix. Removes BobLM's chat history, uploads and stored transcripts; the provider's own transcript files remain. Delete only chats whose work is finished and no longer needed. Call archive_peer first. Refuses your own chat, unanswered owner questions and roots with unarchived subagents. Supply a fresh requestId UUID and reuse it only for an identical explicit retry, which returns the same deletion receipt."
+    )]
+    async fn delete_chat(
+        &self,
+        Parameters(args): Parameters<DeleteChatArgs>,
+        context: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        result(async {
+            let caller = caller(&context)?;
+            let request_id = uuid::Uuid::parse_str(&args.request_id)
+                .map_err(|_| "requestId must be a fresh UUID generated for this deletion. Reuse it only for an identical explicit retry.")?.to_string();
+            let prefix = args.session_id_prefix.trim().to_owned();
+            if prefix.is_empty() || prefix.len() > 128 {
+                return Err("sessionIdPrefix must be 1 to 128 characters: a full session ID or the start of one. Call inspect_peer to check the chat first.".into());
+            }
+            let app = self.app.clone();
+            // Finish registry removal and cleanup even if the HTTP caller disconnects.
+            let receipt = tokio::spawn(async move {
+                crate::app::delete_chat_by_agent(&app, request_id, caller, prefix).await
+            }).await.map_err(|error| format!("BobLM could not confirm deletion because its task stopped: {error}. Retry with the same requestId and chat prefix."))?
+                .map_err(|error| error.to_string())?;
+            Ok(serde_json::json!({"requestId": receipt.request_id, "sessionId": receipt.session_id, "deleted": true, "deletedBySessionId": receipt.caller}))
         }.await)
     }
     #[tool(

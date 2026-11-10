@@ -175,13 +175,18 @@ pub fn list_events(conn: impl MutationConnection, params: ListEventsParams<'_>) 
 #[derive(Debug)]
 pub struct ReceiptParams<'a> {
     pub id: &'a str,
+    pub deleted_by_session_id: Option<&'a str>,
 }
 
-const RECEIPT_SQL: &str = r"INSERT INTO deleted_sessions (id) VALUES (?1)";
+const RECEIPT_SQL: &str =
+    r"INSERT INTO deleted_sessions (id, deleted_by_session_id) VALUES (?1, ?2)";
 
 pub fn receipt(conn: impl MutationConnection, params: ReceiptParams<'_>) -> Result<usize> {
     let conn = conn.as_connection();
-    conn.execute(RECEIPT_SQL, params![params.id])
+    conn.execute(
+        RECEIPT_SQL,
+        params![params.id, params.deleted_by_session_id],
+    )
 }
 
 #[derive(Debug)]
@@ -217,4 +222,124 @@ pub fn upload_removed(
 ) -> Result<usize> {
     let conn = conn.as_connection();
     conn.execute(UPLOAD_REMOVED_SQL, params![params.path])
+}
+
+#[derive(Debug)]
+pub struct AgentReceiptParams<'a> {
+    pub request_id: &'a str,
+}
+
+const AGENT_RECEIPT_SQL: &str = r"SELECT request_id, caller, session_id_prefix, session_id FROM peer_delete_requests WHERE request_id = ?1";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentReceiptRow {
+    pub request_id: String,
+    pub caller: String,
+    pub session_id_prefix: String,
+    pub session_id: String,
+}
+
+pub fn agent_receipt(
+    conn: &Connection,
+    params: AgentReceiptParams<'_>,
+) -> Result<Vec<AgentReceiptRow>> {
+    let mut stmt = conn.prepare_cached(AGENT_RECEIPT_SQL)?;
+    let rows = stmt.query_map(params![params.request_id], |row| {
+        Ok(AgentReceiptRow {
+            request_id: row.get(0)?,
+            caller: row.get(1)?,
+            session_id_prefix: row.get(2)?,
+            session_id: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug)]
+pub struct SaveAgentReceiptParams<'a> {
+    pub request_id: &'a str,
+    pub caller: &'a str,
+    pub session_id_prefix: &'a str,
+    pub session_id: &'a str,
+}
+
+const SAVE_AGENT_RECEIPT_SQL: &str = r"INSERT INTO peer_delete_requests (request_id, caller, session_id_prefix, session_id)
+VALUES (?1, ?2, ?3, ?4)";
+
+pub fn save_agent_receipt(
+    conn: impl MutationConnection,
+    params: SaveAgentReceiptParams<'_>,
+) -> Result<usize> {
+    let conn = conn.as_connection();
+    conn.execute(
+        SAVE_AGENT_RECEIPT_SQL,
+        params![
+            params.request_id,
+            params.caller,
+            params.session_id_prefix,
+            params.session_id
+        ],
+    )
+}
+
+#[derive(Debug)]
+pub struct ProjectTargetsParams<'a> {
+    pub caller: &'a str,
+}
+
+const PROJECT_TARGETS_SQL: &str = r"SELECT target.id, target.archived FROM sessions target JOIN sessions caller ON caller.id = ?1
+WHERE caller.project_id IS NOT NULL AND target.project_id = caller.project_id
+ORDER BY target.id";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectTargetsRow {
+    pub id: String,
+    pub archived: bool,
+}
+
+pub fn project_targets(
+    conn: &Connection,
+    params: ProjectTargetsParams<'_>,
+) -> Result<Vec<ProjectTargetsRow>> {
+    let mut stmt = conn.prepare_cached(PROJECT_TARGETS_SQL)?;
+    let rows = stmt.query_map(params![params.caller], |row| {
+        Ok(ProjectTargetsRow {
+            id: row.get(0)?,
+            archived: row.get(1)?,
+        })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug)]
+pub struct PendingQuestionsParams<'a> {
+    pub id: &'a str,
+}
+
+const PENDING_QUESTIONS_SQL: &str = r"SELECT COUNT(*) FROM questions WHERE session = ?1 AND retired = 0 AND answer IS NULL AND discuss_later = 0";
+
+pub fn pending_questions(
+    conn: &Connection,
+    params: PendingQuestionsParams<'_>,
+) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare_cached(PENDING_QUESTIONS_SQL)?;
+    let rows = stmt.query_map(params![params.id], |row| row.get(0))?;
+    rows.collect()
+}
+
+#[derive(Debug)]
+pub struct DeletionActorParams<'a> {
+    pub id: &'a str,
+}
+
+const DELETION_ACTOR_SQL: &str =
+    r"SELECT deleted_by_session_id FROM deleted_sessions WHERE id = ?1";
+
+pub fn deletion_actor(
+    conn: &Connection,
+    params: DeletionActorParams<'_>,
+) -> Result<Vec<Option<String>>> {
+    let mut stmt = conn.prepare_cached(DELETION_ACTOR_SQL)?;
+    let rows = stmt.query_map(params![params.id], |row| row.get(0))?;
+    rows.collect()
 }

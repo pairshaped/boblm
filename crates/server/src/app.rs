@@ -830,21 +830,136 @@ async fn delete_session(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<
 /// Delete one archived chat and queue its uploads for cleanup. An already deleted chat is not an error
 /// for a caller that holds a receipt, so a retry after a lost reply succeeds.
 pub(crate) async fn delete_chat(app: &App, session_id: String) -> Result<(), ApiError> {
+    delete_chat_inner(app, session_id, None).await
+}
+
+pub(crate) async fn delete_chat_by_agent(
+    app: &App,
+    request_id: String,
+    caller: String,
+    prefix: String,
+) -> Result<boblm_store::AgentDeletionReceipt, ApiError> {
+    let store = app.store.clone();
+    let receipt = tokio::task::spawn_blocking(move || {
+        store.prepare_agent_deletion(&request_id, &caller, &prefix)
+    })
+    .await
+    .map_err(ApiError::internal)??;
+    delete_chat_inner(app, receipt.session_id.clone(), Some(&receipt)).await?;
+    Ok(receipt)
+}
+
+async fn delete_chat_inner(
+    app: &App,
+    session_id: String,
+    agent: Option<&boblm_store::AgentDeletionReceipt>,
+) -> Result<(), ApiError> {
+    let mut registry = app.sessions.lock().await;
+    if let Some(agent) = agent {
+        let store = app.store.clone();
+        let (request, caller, prefix) = (
+            agent.request_id.clone(),
+            agent.caller.clone(),
+            agent.session_id_prefix.clone(),
+        );
+        let checked = tokio::task::spawn_blocking(move || {
+            store.prepare_agent_deletion(&request, &caller, &prefix)
+        })
+        .await
+        .map_err(ApiError::internal)??;
+        if checked.session_id != session_id {
+            return Err(ApiError::invalid(
+                "The chat prefix now selects a different chat. Inspect it and use its full ID with a fresh requestId.",
+            ));
+        }
+    }
+    let store = app.store.clone();
+    let id = session_id.clone();
+    let already_deleted = tokio::task::spawn_blocking(move || store.reader()?.session_deleted(&id))
+        .await
+        .map_err(ApiError::internal)??;
+    if already_deleted {
+        // A runner may have committed before its reply was lost. The durable
+        // receipt wins over stale registry handles, including cascade members.
+        let registered = registry.keys().cloned().collect::<Vec<_>>();
+        let store = app.store.clone();
+        let deleted = tokio::task::spawn_blocking(move || {
+            let reader = store.reader()?;
+            registered
+                .into_iter()
+                .filter_map(|id| match reader.session_deleted(&id) {
+                    Ok(true) => Some(Ok(id)),
+                    Ok(false) => None,
+                    Err(error) => Some(Err(error)),
+                })
+                .collect::<boblm_store::Result<Vec<_>>>()
+        })
+        .await
+        .map_err(ApiError::internal)??;
+        for id in deleted {
+            if let Some(session) = registry.remove(&id) {
+                let _ = session.handle().delete().await;
+            }
+        }
+        drop(registry);
+        app.remove_deleted_uploads().await?;
+        return Ok(());
+    }
     let store = app.store.clone();
     let root = session_id.clone();
     let subagents = tokio::task::spawn_blocking(move || store.reader()?.subagents_of_root(&root))
         .await
         .map_err(ApiError::internal)??;
-    let mut registry = app.sessions.lock().await;
-    for subagent in subagents {
-        if let Some(session) = registry.get(&subagent) {
-            session.handle().delete().await?;
-            registry.remove(&subagent);
+    // Agent deletion commits its guards and cascade atomically. Keep the owner
+    // command sequence compatible with runners from earlier releases.
+    for subagent in &subagents {
+        if let Some(session) = registry.get(subagent) {
+            let prepared = if agent.is_some() {
+                session.handle().prepare_delete().await
+            } else {
+                session.handle().delete().await
+            };
+            if let Err(error) = prepared {
+                for id in &subagents {
+                    if let Some(child) = registry.get(id) {
+                        let _ = child.handle().cancel_prepared_deletion().await;
+                    }
+                }
+                return Err(error.into());
+            }
+        }
+        if agent.is_none() {
+            registry.remove(subagent);
         }
     }
     if let Some(session) = registry.get(&session_id) {
-        session.handle().delete().await?;
+        let deleted = if let Some(agent) = agent {
+            session
+                .handle()
+                .delete_by_agent(&agent.request_id, &agent.caller, &agent.session_id_prefix)
+                .await
+        } else {
+            session.handle().delete().await
+        };
+        if let Err(error) = deleted {
+            for id in &subagents {
+                if let Some(child) = registry.get(id) {
+                    let _ = child.handle().cancel_prepared_deletion().await;
+                }
+            }
+            return Err(error.into());
+        }
         registry.remove(&session_id);
+        for subagent in subagents {
+            if let Some(session) = registry.get(&subagent)
+                && let Err(error) = session.handle().delete().await
+            {
+                eprintln!(
+                    "session={subagent}: The chat was deleted after its agent stopped, but its runner did not confirm exit: {error}. Check its runner service."
+                );
+            }
+            registry.remove(&subagent);
+        }
     } else {
         let store = app.store.clone();
         let id = session_id;
