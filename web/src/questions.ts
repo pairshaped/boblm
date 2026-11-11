@@ -15,7 +15,6 @@ export function questionsContent(model: Model) {
   };
   const questions = model.questions;
   const pending = questions.filter((q) => q.state === "pending");
-  const answered = questions.filter((q) => q.state === "answered");
   const totalPending = Math.max(model.questionPendingCount, pending.length);
   const waiting = Math.max(0, totalPending - 1);
   const saving = Object.keys(model.questionSending).length > 0;
@@ -156,17 +155,5 @@ export function questionsContent(model: Model) {
     totalPending > 0 && !pending.length
       ? h("p", { role: "status" }, "Loading the next question…")
       : null,
-    answered.length ? h("h3", {}, "Recently answered") : null,
-    answered.map((q) =>
-      h(
-        "section",
-        { key: q.id, class: "question answered", id: `question-${q.id}` },
-        subagentLabel(q.sessionId)
-          ? h("p", { class: "question-subagent" }, subagentLabel(q.sessionId))
-          : null,
-        h("p", {}, q.question),
-        h("p", {}, `Answered: ${q.answer}`),
-      ),
-    ),
   );
 }

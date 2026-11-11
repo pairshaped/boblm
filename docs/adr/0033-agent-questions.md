@@ -24,7 +24,7 @@ The shared Questions modal presents unanswered prompts from all chats and subage
 FIFO queue, ordered by creation time then question ID. Archived chats are included; deleted chats
 and retired questions are excluded. Each prompt shows its originating chat, with a subagent label
 and parent chat name when available. It shows the oldest pending question and how many are waiting.
-Recent answered and deferred decisions are bounded by the configured list limit.
+Answered and deferred questions are not shown. The list response carries a bounded number of them, set by the configured list limit, so the browser can reflect a just-saved decision.
 
 Suggested answers are radio buttons, followed by Discuss later and then Type a different answer,
 which opens a text field. Clicking a suggested answer or Discuss later anywhere in its label submits

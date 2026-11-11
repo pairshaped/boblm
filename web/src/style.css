@@ -1296,9 +1296,6 @@ pre {
   margin: 8px 0;
   resize: vertical;
 }
-.questions .answered {
-  color: var(--color-muted);
-}
 .questions fieldset {
   min-width: 0;
   margin: 0;
@@ -1597,10 +1594,17 @@ pre {
 }
 
 .dialog.questions {
-  width: min(40rem, calc(100vw - 2rem));
-  max-width: 40rem;
-  max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
+  width: 80vw;
+  height: 80dvh;
+  /* The header stays put and only the question content scrolls. */
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+@media (max-width: 650px) {
+  .dialog.questions {
+    width: calc(100vw - 2rem);
+    height: calc(100dvh - 2rem);
+  }
 }
 .questions > header {
   display: flex;
