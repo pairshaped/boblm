@@ -962,11 +962,7 @@ async fn the_root_reports_subagent_state_and_answers_its_questions() {
     assert_eq!(root["subagents"]["failures"], 1);
     assert_eq!(root["subagents"]["reportFailures"], 1);
 
-    let questions = post(
-        "/commands/listQuestions",
-        serde_json::json!({"sessionId":"root"}),
-    )
-    .await;
+    let questions = post("/commands/listQuestions", serde_json::json!({})).await;
     assert_eq!(questions["pendingCount"], 1);
     assert_eq!(questions["questions"][0]["sessionId"], child);
     assert_eq!(questions["questions"][0]["id"], question);

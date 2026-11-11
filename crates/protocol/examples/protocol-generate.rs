@@ -427,6 +427,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("archived", json!({"archived":true})),
         ("state_summary", serde_json::to_value(&status)?),
         ("subagents_changed", json!({})),
+        ("questions_changed", json!({})),
     ] {
         let event: SessionListEvent = serde_json::from_value(
             json!({"sessionId":"s","seq":1,"createdAt":1,"kind":kind,"payload":payload}),

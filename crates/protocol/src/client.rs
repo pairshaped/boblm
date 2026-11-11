@@ -861,6 +861,13 @@ pub enum SessionListEvent {
         created_at: i64,
         payload: SessionStatus,
     },
+    /// A chat's questions changed, so the shared questions dialog must refresh.
+    QuestionsChanged {
+        session_id: String,
+        seq: Sequence,
+        created_at: i64,
+        payload: Empty,
+    },
     /// A root chat's subagent summary changed in a way no other list event shows.
     SubagentsChanged {
         session_id: String,
@@ -877,6 +884,7 @@ impl SessionListEvent {
             | Self::Renamed { seq, .. }
             | Self::Archived { seq, .. }
             | Self::StateSummary { seq, .. }
+            | Self::QuestionsChanged { seq, .. }
             | Self::SubagentsChanged { seq, .. } => *seq,
         }
     }
@@ -908,6 +916,7 @@ pub struct ContractSchemas {
     chat_presence: ChatPresence,
     chat_presence_reply: ChatPresenceReply,
     questions: QuestionsReply,
+    list_questions: ListQuestions,
     answer_question: AnswerQuestion,
     discuss_question_later: DiscussQuestionLater,
     submit_secret: SubmitSecret,
@@ -1252,5 +1261,15 @@ impl CommandBody for DiscussQuestionLater {
     fn validate(&self) -> Result<(), String> {
         check_session(&self.session_id)?;
         check_uuid("questionId", &self.question_id)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListQuestions {}
+
+impl CommandBody for ListQuestions {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
     }
 }

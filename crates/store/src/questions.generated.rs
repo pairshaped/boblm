@@ -207,23 +207,20 @@ pub fn accepted(conn: impl MutationConnection, params: AcceptedParams<'_>) -> Re
 }
 
 #[derive(Debug)]
-pub struct ListForRootParams<'a> {
-    pub root_session_id: &'a str,
+pub struct ListAllParams {
     pub limit: i64,
 }
 
-const LIST_FOR_ROOT_SQL: &str = r"SELECT q.id, q.session, q.question, q.choices, q.answer, q.created_at, q.answered_at, q.delivery_accepted, q.discuss_later, q.deferred_at FROM questions q
+const LIST_ALL_SQL: &str = r"SELECT q.id, q.session, q.question, q.choices, q.answer, q.created_at, q.answered_at, q.delivery_accepted, q.discuss_later, q.deferred_at FROM questions q
 JOIN sessions s ON s.id = q.session
-WHERE (s.id = ?1 OR s.root_session_id = ?1 OR s.parent_session_id = ?1)
- AND q.retired = 0 AND (q.answer IS NOT NULL OR q.discuss_later = 1 OR q.id = (
+WHERE q.retired = 0 AND (q.answer IS NOT NULL OR q.discuss_later = 1 OR q.id = (
  SELECT q2.id FROM questions q2 JOIN sessions s2 ON s2.id = q2.session
- WHERE (s2.id = ?1 OR s2.root_session_id = ?1 OR s2.parent_session_id = ?1)
-  AND q2.retired = 0 AND q2.answer IS NULL AND q2.discuss_later = 0 ORDER BY q2.position LIMIT 1
+ WHERE q2.retired = 0 AND q2.answer IS NULL AND q2.discuss_later = 0 ORDER BY q2.created_at, q2.id LIMIT 1
 ))
-ORDER BY CASE WHEN q.answer IS NULL AND q.discuss_later = 0 THEN 0 WHEN q.discuss_later = 1 THEN 1 ELSE 2 END, q.position DESC, q.id LIMIT ?2";
+ORDER BY CASE WHEN q.answer IS NULL AND q.discuss_later = 0 THEN 0 WHEN q.discuss_later = 1 THEN 1 ELSE 2 END, q.created_at DESC, q.id DESC LIMIT ?1";
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ListForRootRow {
+pub struct ListAllRow {
     pub id: String,
     pub session: String,
     pub question: String,
@@ -236,13 +233,10 @@ pub struct ListForRootRow {
     pub deferred_at: Option<i64>,
 }
 
-pub fn list_for_root(
-    conn: &Connection,
-    params: ListForRootParams<'_>,
-) -> Result<Vec<ListForRootRow>> {
-    let mut stmt = conn.prepare_cached(LIST_FOR_ROOT_SQL)?;
-    let rows = stmt.query_map(params![params.root_session_id, params.limit], |row| {
-        Ok(ListForRootRow {
+pub fn list_all(conn: &Connection, params: ListAllParams) -> Result<Vec<ListAllRow>> {
+    let mut stmt = conn.prepare_cached(LIST_ALL_SQL)?;
+    let rows = stmt.query_map(params![params.limit], |row| {
+        Ok(ListAllRow {
             id: row.get(0)?,
             session: row.get(1)?,
             question: row.get(2)?,
@@ -271,21 +265,12 @@ pub fn count_pending(conn: &Connection, params: CountPendingParams<'_>) -> Resul
     rows.collect()
 }
 
-#[derive(Debug)]
-pub struct CountPendingForRootParams<'a> {
-    pub root_session_id: &'a str,
-}
+const COUNT_PENDING_ALL_SQL: &str = r"SELECT COUNT(*) FROM questions q JOIN sessions s ON s.id = q.session
+WHERE q.retired = 0 AND q.answer IS NULL AND q.discuss_later = 0";
 
-const COUNT_PENDING_FOR_ROOT_SQL: &str = r"SELECT COUNT(*) FROM questions q JOIN sessions s ON s.id = q.session
-WHERE (s.id = ?1 OR s.root_session_id = ?1 OR s.parent_session_id = ?1)
- AND q.retired = 0 AND q.answer IS NULL AND q.discuss_later = 0";
-
-pub fn count_pending_for_root(
-    conn: &Connection,
-    params: CountPendingForRootParams<'_>,
-) -> Result<Vec<i64>> {
-    let mut stmt = conn.prepare_cached(COUNT_PENDING_FOR_ROOT_SQL)?;
-    let rows = stmt.query_map(params![params.root_session_id], |row| row.get(0))?;
+pub fn count_pending_all(conn: &Connection) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare_cached(COUNT_PENDING_ALL_SQL)?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
     rows.collect()
 }
 

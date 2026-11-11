@@ -69,6 +69,9 @@ pub(crate) fn append(
     if kind == "agent_event" {
         crate::account_usage::observe(tx, session, &payload, created_at)?;
     }
+    if kind == "questions_changed" {
+        crate::session_list::append(tx, session, kind, &serde_json::json!({}), created_at)?;
+    }
     crate::notifications::automatic(tx, session, kind, &payload, created_at)?;
     // A root's subagent summary counts open questions and failed report deliveries. Both are
     // recorded as these events on the subagent, so they are the one place to tell the list.

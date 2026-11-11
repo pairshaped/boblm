@@ -3,20 +3,17 @@ import type { Model, Msg } from "./app.ts";
 const on = bindEvents<Msg>();
 
 export function questionsContent(model: Model) {
-  const root = model.active;
-  const belongsToRoot = (sessionId: string) =>
-    sessionId === root ||
-    model.sessions.some(
-      (s) =>
-        s.sessionId === sessionId &&
-        (s.rootSessionId === root || s.parentSessionId === root),
-    );
-  const subagentLabel = (sessionId: string): string | null => {
-    if (sessionId === root) return null;
+  const subagentLabel = (sessionId: string): string => {
     const session = model.sessions.find((s) => s.sessionId === sessionId);
-    return `Subagent: ${session?.name.trim() || sessionId}`;
+    const parent = model.sessions.find(
+      (s) =>
+        s.sessionId === (session?.rootSessionId ?? session?.parentSessionId),
+    );
+    return session?.parentSessionId
+      ? `Subagent: ${session.name.trim() || sessionId}${parent ? ` · ${parent.name}` : ""}`
+      : session?.name.trim() || sessionId;
   };
-  const questions = model.questions.filter((q) => belongsToRoot(q.sessionId));
+  const questions = model.questions;
   const pending = questions.filter((q) => q.state === "pending");
   const answered = questions.filter((q) => q.state === "answered");
   const totalPending = Math.max(model.questionPendingCount, pending.length);

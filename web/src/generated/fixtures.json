@@ -629,6 +629,16 @@
     }
   },
   {
+    "type": "SessionListEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "questions_changed",
+      "payload": {},
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
     "type": "StoredEvent",
     "value": {
       "createdAt": 1,

@@ -176,8 +176,9 @@ export type Model = {
   dismissed: Readonly<Record<string, true>>;
   /** Explicit folding choices on this page, scoped by chat and row key; peers start folded. */
   collapsedMessages: Readonly<Record<string, boolean>>;
-  /** Whether the shared questions and agents drawer is open. */
+  /** Whether the agents and jobs drawer is open. */
   drawerOpen: boolean;
+  questionsOpen: boolean;
   /** On a phone, whether the chat list covers the screen. It also shows with no chat open or no login. */
   sidebarOpen: boolean;
   /** The chat that was open when the page loaded, reopened once the chat list arrives. */
@@ -186,7 +187,7 @@ export type Model = {
   speaking: string | null;
   /** The image open full screen, with the label shown over it. */
   pushState: "unavailable" | "available" | "enabled";
-  drawerTab: "agents" | "jobs" | "questions";
+  drawerTab: "agents" | "jobs";
   subagentConversation: SubagentConversation | null;
   subagentGeneration: number;
   subagents: ReadonlyArray<Subagent>;
@@ -301,7 +302,7 @@ export type Msg =
     }
   | { type: "reloadPage"; sessionId: string }
   | { type: "togglePush" }
-  | { type: "selectDrawerTab"; tab: "agents" | "jobs" | "questions" }
+  | { type: "selectDrawerTab"; tab: "agents" | "jobs" }
   | { type: "openSubagent"; key: string }
   | { type: "backToAgents" }
   | { type: "subagentFollowing"; value: boolean }
@@ -322,6 +323,8 @@ export type Msg =
   | { type: "discussQuestionLater"; id: string }
   | { type: "answerQuestion"; id: string; answer: string }
   | { type: "reloadQuestions" }
+  | { type: "openQuestions" }
+  | { type: "closeQuestions" }
   | { type: "openImage"; id: string }
   | { type: "closeImage" }
   | { type: "stepImage"; direction: -1 | 1 }
@@ -403,6 +406,7 @@ export type Effect =
   | { type: "reloadPage"; model: Model }
   | { type: "togglePush"; enabled: boolean; token: string }
   | { type: "focusQuestion"; id: string }
+  | { type: "focusQuestions"; open: boolean }
   | { type: "focusLightbox" }
   | { type: "focusImage"; id: string }
   | { type: "persistLastChat"; id: string | null }
@@ -523,6 +527,7 @@ export function initial(
     speaking: null,
     pushState: "unavailable",
     drawerTab: "agents",
+    questionsOpen: false,
     subagentConversation: null,
     subagentGeneration: 0,
     subagents: [],
@@ -870,12 +875,6 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         lightbox: null,
         subagentConversation: null,
         subagents: [],
-        questions: [],
-        questionPendingCount: 0,
-        questionToFocus: model.active === null ? model.questionToFocus : null,
-        questionError: "",
-        questionSending: {},
-        questionGeneration: model.questionGeneration + 1,
         sidebarOpen: false,
         active: msg.id,
         newMessages: false,
@@ -889,16 +888,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         type: "history",
         direction: "latest",
       });
-      return pruneThumbnails(next, [
-        ...effects,
-        request(
-          "listQuestions",
-          { sessionId: msg.id },
-          msg.id,
-          next.questionGeneration,
-        ),
-        ...load,
-      ]);
+      return pruneThumbnails(next, [...effects, ...load]);
     }
     case "visibility": {
       if (msg.hidden)
@@ -1102,16 +1092,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
           ...(subagent ? { target: "subagent" as const } : {}),
         },
       ];
-      // Read questions after the snapshot cursor too: a change between the first
-      // question read and this history snapshot would otherwise be behind the SSE cursor.
-      const questionGeneration =
-        current.direction === "latest" && !subagent
-          ? model.questionGeneration + 1
-          : model.questionGeneration;
-      if (current.direction === "latest" && !subagent)
-        effects.push(
-          request("listQuestions", { sessionId: id }, id, questionGeneration),
-        );
+      const questionGeneration = model.questionGeneration;
       for (const row of incoming.rows)
         for (const a of row.attachments ?? [])
           if (isImage(a.contentType) && !model.thumbs[a.id])
@@ -2000,10 +1981,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
     }
     case "questionChoice": {
       const q = model.questions.find(
-        (q) =>
-          q.id === msg.id &&
-          q.sessionId === model.active &&
-          q.state === "pending",
+        (q) => q.id === msg.id && q.state === "pending",
       );
       if (!q || Object.keys(model.questionSending).length > 0)
         return [model, []];
@@ -2024,10 +2002,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
     }
     case "discussQuestionLater": {
       const q = model.questions.find(
-        (q) =>
-          q.id === msg.id &&
-          q.sessionId === model.active &&
-          q.state === "pending",
+        (q) => q.id === msg.id && q.state === "pending",
       );
       if (!q || Object.keys(model.questionSending).length > 0)
         return [model, []];
@@ -2036,8 +2011,8 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         [
           request(
             "discussQuestionLater",
-            { sessionId: model.active, questionId: msg.id },
-            model.active!,
+            { sessionId: q.sessionId, questionId: msg.id },
+            q.sessionId,
           ),
         ],
       ];
@@ -2051,9 +2026,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         [],
       ];
     case "answerQuestion": {
-      const q = model.questions.find(
-        (q) => q.id === msg.id && q.sessionId === model.active,
-      );
+      const q = model.questions.find((q) => q.id === msg.id);
       if (
         !q ||
         q.state !== "pending" ||
@@ -2070,25 +2043,27 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         [
           request(
             "answerQuestion",
-            { sessionId: model.active, questionId: msg.id, answer: msg.answer },
-            model.active!,
+            { sessionId: q.sessionId, questionId: msg.id, answer: msg.answer },
+            q.sessionId,
           ),
         ],
       ];
     }
+    case "openQuestions":
+      return [
+        { ...model, questionsOpen: true },
+        [{ type: "focusQuestions", open: true }],
+      ];
+    case "closeQuestions":
+      return [
+        { ...model, questionsOpen: false },
+        [{ type: "focusQuestions", open: false }],
+      ];
     case "reloadQuestions": {
-      if (!model.active) return [model, []];
       const generation = model.questionGeneration + 1;
       return [
         { ...model, questionGeneration: generation },
-        [
-          request(
-            "listQuestions",
-            { sessionId: model.active },
-            model.active,
-            generation,
-          ),
-        ],
+        [request("listQuestions", {}, undefined, generation)],
       ];
     }
     case "openImage": {
@@ -2370,10 +2345,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
       // belongs to a chat the browser has forgotten, so it must not replace the current error.
       if (msg.sessionId && model.forgotten[msg.sessionId]) return [model, []];
       if (msg.name === "listQuestions") {
-        if (
-          msg.sessionId !== model.active ||
-          msg.orderGeneration !== model.questionGeneration
-        )
+        if (msg.orderGeneration !== model.questionGeneration)
           return [model, []];
         if (msg.outcome.kind === "replied")
           return [
@@ -2404,7 +2376,6 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         msg.name === "answerQuestion" ||
         msg.name === "discussQuestionLater"
       ) {
-        if (msg.sessionId !== model.active) return [model, []];
         const error =
           msg.outcome.kind === "rejected"
             ? msg.outcome.error.message
@@ -2435,14 +2406,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
               questionPendingCount: (msg.outcome.reply as QuestionsReply)
                 .pendingCount,
             },
-            [
-              request(
-                "listQuestions",
-                { sessionId: model.active },
-                model.active!,
-                next.questionGeneration,
-              ),
-            ],
+            [request("listQuestions", {}, undefined, next.questionGeneration)],
           ];
         }
         return [next, []];
@@ -2602,6 +2566,11 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
           listCursor: list.cursor ?? 0,
           listGeneration: next.listGeneration + 1,
         };
+        const [questionsNext, questionEffects] = step(next, {
+          type: "reloadQuestions",
+        });
+        next = questionsNext;
+        effects.push(...questionEffects);
         effects.push({
           type: "persistList",
           list: {
@@ -2754,17 +2723,6 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         (model.history[e.sessionId] && !model.history[e.sessionId]!.loaded)
       )
         return [model, []];
-      if (e.kind === "questions_changed") {
-        if (
-          e.sessionId !== model.active ||
-          e.seq <= (model.cursors[e.sessionId] ?? 0)
-        )
-          return [model, []];
-        return step(
-          { ...model, cursors: { ...model.cursors, [e.sessionId]: e.seq } },
-          { type: "reloadQuestions" },
-        );
-      }
       if (e.seq <= (model.cursors[e.sessionId] ?? 0)) return [model, []];
       const current = model.history[e.sessionId] ?? {
         ...emptyHistory(),
@@ -2873,6 +2831,8 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
       const e = msg.event;
       if (e.seq <= model.listCursor) return [model, []];
       let next = { ...model, listCursor: e.seq };
+      if (e.kind === "questions_changed")
+        return step(next, { type: "reloadQuestions" });
       // A root's sidebar summary (open count, questions, failures) is computed by the
       // server and absent from live events. A child's archive, reopen, delete and turn change
       // refetch the list, as does the server's subagents_changed for what no other event
@@ -2887,9 +2847,16 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
             e.payload.turnActive !== known.status.turnActive));
       if (e.kind === "deleted") {
         const [forgotten, effects] = forgetChat(next, e.sessionId);
+        const [refreshed, reload] = step(forgotten, {
+          type: "reloadQuestions",
+        });
         return [
-          forgotten,
-          childChanged ? [...effects, listRequest(forgotten)] : effects,
+          refreshed,
+          [
+            ...effects,
+            ...reload,
+            ...(childChanged ? [listRequest(refreshed)] : []),
+          ],
         ];
       }
       if (e.kind === "state_summary")
@@ -3102,8 +3069,8 @@ function lightboxView(
     ),
   );
 }
-/** One header toggle controls the shared questions and agents drawer. */
-function drawerToggle(open: boolean, pending: number, mobile = false) {
+/** One header toggle controls the agents and jobs drawer. */
+function drawerToggle(open: boolean, mobile = false) {
   return h(
     "button",
     {
@@ -3129,23 +3096,15 @@ function drawerToggle(open: boolean, pending: number, mobile = false) {
       h("rect", { x: 3, y: 4, width: 18, height: 16, rx: 2 }),
       h("path", { d: "M15 4v16" }),
     ),
-    pending
-      ? h(
-          "span",
-          { class: "count", "aria-label": `${pending} unanswered questions` },
-          String(pending),
-        )
-      : null,
   );
 }
 function drawerTabs(model: Model, running: number) {
-  const tabs = ["agents", "jobs", "questions"] as const;
+  const tabs = ["agents", "jobs"] as const;
   const counts = {
     agents: running,
     jobs:
       model.sessions.find((s) => s.sessionId === model.active)?.status.jobs
         ?.tasks.length ?? 0,
-    questions: model.questionPendingCount,
   };
   return h(
     "header",
@@ -3185,16 +3144,12 @@ function drawerTabs(model: Model, running: number) {
               return { type: "selectDrawerTab", tab: next };
             }),
           },
-          tab === "questions"
-            ? "Questions"
-            : tab === "jobs"
-              ? "Jobs"
-              : "Subagents",
+          tab === "jobs" ? "Jobs" : "Subagents",
           counts[tab] ? ` (${counts[tab]})` : "",
         ),
       ),
     ),
-    drawerToggle(true, 0, true),
+    drawerToggle(true, true),
   );
 }
 /** A small rosette whose petals and hue come from the subagent's id, so each one keeps its look. */
@@ -4577,7 +4532,8 @@ export function view(model: Model): VNode<Model> {
               ),
             )
           : null,
-        session ? drawerToggle(drawerOpen, model.questionPendingCount) : null,
+        questionsButton(model),
+        session ? drawerToggle(drawerOpen) : null,
       ),
       h(
         "div",
@@ -5163,7 +5119,7 @@ export function view(model: Model): VNode<Model> {
           "aside",
           {
             id: "chat-drawer",
-            class: `subagents${model.drawerTab === "questions" ? " questions" : ""}`,
+            class: "subagents",
             "aria-label": "Chat details",
           },
           drawerTabs(
@@ -5180,19 +5136,18 @@ export function view(model: Model): VNode<Model> {
               "aria-labelledby": `drawer-tab-${model.drawerTab}`,
               class: "drawer-panel",
             },
-            model.drawerTab === "questions"
-              ? questionsContent(model)
-              : model.drawerTab === "jobs"
-                ? jobsContent(model)
-                : model.subagentConversation
-                  ? subagentConversationContent(model)
-                  : agentsContent(subagents, model),
+            model.drawerTab === "jobs"
+              ? jobsContent(model)
+              : model.subagentConversation
+                ? subagentConversationContent(model)
+                : agentsContent(subagents, model),
           ),
         )
       : null,
     model.lightbox && model.thumbs[model.lightbox.id]
       ? lightboxView(model, model.lightbox, model.thumbs[model.lightbox.id]!)
       : null,
+    model.questionsOpen ? questionsDialog(model) : null,
     model.newChat ? newChatDialog(model, model.newChat) : null,
     model.renameChat ? renameChatDialog(model.renameChat) : null,
     model.directoryPicker ? directoryDialog(model.directoryPicker) : null,
@@ -5818,4 +5773,75 @@ export function subscriptions(
     resetSubscription ?? emptySubscription<Msg>("slot:usage-reset"),
     subagentStream,
   ];
+}
+
+function questionsButton(model: Model) {
+  return h(
+    "button",
+    {
+      id: "open-questions",
+      type: "button",
+      class: "header-icon questions-toggle",
+      "aria-label": `Open questions (${model.questionPendingCount} unanswered)`,
+      "aria-haspopup": "dialog",
+      onClick: on.clicked({ type: "openQuestions" }),
+    },
+    h("span", { "aria-hidden": "true" }, "?"),
+    model.questionPendingCount
+      ? h("span", { class: "count" }, String(model.questionPendingCount))
+      : null,
+  );
+}
+function questionsDialog(model: Model) {
+  return h(
+    "div",
+    { class: "backdrop" },
+    h(
+      "section",
+      {
+        id: "questions-dialog",
+        class: "dialog questions",
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-label": "Questions",
+        onkeydown: binding((event) => {
+          const key = event as KeyboardEvent;
+          if (key.key === "Escape") return { type: "closeQuestions" };
+          if (key.key === "Tab") {
+            const fields = [
+              ...(event.currentTarget as Element).querySelectorAll<HTMLElement>(
+                "button:not(:disabled), input:not(:disabled), textarea:not(:disabled)",
+              ),
+            ];
+            const first = fields[0],
+              last = fields.at(-1);
+            if (key.shiftKey && event.target === first) {
+              event.preventDefault();
+              last?.focus();
+            } else if (!key.shiftKey && event.target === last) {
+              event.preventDefault();
+              first?.focus();
+            }
+          }
+          return { type: "noop" };
+        }),
+      },
+      h(
+        "header",
+        {},
+        h("strong", {}, "Questions"),
+        h(
+          "button",
+          {
+            type: "button",
+            autofocus: true,
+            "aria-label": "Close questions",
+            onClick: on.clicked({ type: "closeQuestions" }),
+          },
+          "Close",
+        ),
+      ),
+      questionsContent(model),
+    ),
+  );
 }

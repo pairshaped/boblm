@@ -2,8 +2,8 @@
 use crate::app::{ApiError, ApiResult, App};
 use axum::{Json, body::Bytes, extract::State};
 use boblm_protocol::client::{
-    AnswerQuestion, CommandBody, DiscussQuestionLater, QuestionInfo, QuestionState, QuestionsReply,
-    SessionRef,
+    AnswerQuestion, CommandBody, DiscussQuestionLater, ListQuestions, QuestionInfo, QuestionState,
+    QuestionsReply,
 };
 use rmcp::schemars;
 use std::sync::Arc;
@@ -80,7 +80,7 @@ async fn question_session(app: &App, root: &str, id: &str) -> Result<String, Api
     .map_err(ApiError::internal)?
     .map_err(|_| {
         ApiError::invalid(
-            "This question does not belong to this chat or its subagents, or it no longer exists. Reload the questions drawer.",
+            "This question does not belong to this chat or its subagents, or it no longer exists. Reload the questions dialog.",
         )
     })
 }
@@ -125,7 +125,7 @@ impl App {
             format!("Could not record the question: {e}. Try again with the same questionId.")
         })?
         .map_err(|e| e.to_string())?;
-        serde_json::to_value(wire(q).map_err(|e|e.to_string())?).map_err(|e|format!("Could not return the recorded question: {e}. Inspect the questions drawer before retrying."))
+        serde_json::to_value(wire(q).map_err(|e|e.to_string())?).map_err(|e|format!("Could not return the recorded question: {e}. Inspect the questions dialog before retrying."))
     }
     pub async fn update_question(
         &self,
@@ -252,14 +252,13 @@ impl App {
     }
 }
 pub async fn list(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<QuestionsReply> {
-    let request: SessionRef = super::app::body(&bytes)?;
-    app.handle(&request.session_id).await?;
+    let _: ListQuestions = super::app::body(&bytes)?;
     let store = app.store.clone();
     let (rows, count) = tokio::task::spawn_blocking(move || {
         let reader = store.reader()?;
         Ok::<_, boblm_store::Error>((
-            reader.questions_for_root(&request.session_id)?,
-            reader.pending_question_count_for_root(&request.session_id)?,
+            reader.all_questions()?,
+            reader.pending_question_count_all()?,
         ))
     })
     .await
@@ -300,11 +299,10 @@ pub async fn answer(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<Ques
     .map_err(ApiError::internal)??;
     // The scheduler also drains this outbox, including after a lost HTTP connection or restart.
     app.deliver_question_answers().await;
-    let (store, session) = (app.store.clone(), request.session_id.clone());
-    let count =
-        tokio::task::spawn_blocking(move || store.reader()?.pending_question_count(&session))
-            .await
-            .map_err(ApiError::internal)??;
+    let store = app.store.clone();
+    let count = tokio::task::spawn_blocking(move || store.reader()?.pending_question_count_all())
+        .await
+        .map_err(ApiError::internal)??;
     Ok(Json(QuestionsReply {
         pending_count: u32::try_from(count).map_err(ApiError::internal)?,
         questions: vec![wire(q)?],
@@ -323,11 +321,10 @@ pub async fn discuss_later(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResu
     .await
     .map_err(ApiError::internal)??;
     app.deliver_question_answers().await;
-    let (store, session) = (app.store.clone(), request.session_id.clone());
-    let count =
-        tokio::task::spawn_blocking(move || store.reader()?.pending_question_count(&session))
-            .await
-            .map_err(ApiError::internal)??;
+    let store = app.store.clone();
+    let count = tokio::task::spawn_blocking(move || store.reader()?.pending_question_count_all())
+        .await
+        .map_err(ApiError::internal)??;
     Ok(Json(QuestionsReply {
         pending_count: u32::try_from(count).map_err(ApiError::internal)?,
         questions: vec![wire(q)?],

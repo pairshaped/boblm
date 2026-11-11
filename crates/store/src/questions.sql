@@ -31,24 +31,21 @@ WHERE retired = 0 AND delivery_accepted = 0 AND (
 -- func: accepted
 UPDATE questions SET delivery_accepted = 1 WHERE id = @id;
 
--- func: list_for_root
+-- func: list_all
 SELECT q.id, q.session, q.question, q.choices, q.answer, q.created_at, q.answered_at, q.delivery_accepted, q.discuss_later, q.deferred_at FROM questions q
 JOIN sessions s ON s.id = q.session
-WHERE (s.id = @root_session_id OR s.root_session_id = @root_session_id OR s.parent_session_id = @root_session_id)
- AND q.retired = 0 AND (q.answer IS NOT NULL OR q.discuss_later = 1 OR q.id = (
+WHERE q.retired = 0 AND (q.answer IS NOT NULL OR q.discuss_later = 1 OR q.id = (
  SELECT q2.id FROM questions q2 JOIN sessions s2 ON s2.id = q2.session
- WHERE (s2.id = @root_session_id OR s2.root_session_id = @root_session_id OR s2.parent_session_id = @root_session_id)
-  AND q2.retired = 0 AND q2.answer IS NULL AND q2.discuss_later = 0 ORDER BY q2.position LIMIT 1
+ WHERE q2.retired = 0 AND q2.answer IS NULL AND q2.discuss_later = 0 ORDER BY q2.created_at, q2.id LIMIT 1
 ))
-ORDER BY CASE WHEN q.answer IS NULL AND q.discuss_later = 0 THEN 0 WHEN q.discuss_later = 1 THEN 1 ELSE 2 END, q.position DESC, q.id LIMIT @limit;
+ORDER BY CASE WHEN q.answer IS NULL AND q.discuss_later = 0 THEN 0 WHEN q.discuss_later = 1 THEN 1 ELSE 2 END, q.created_at DESC, q.id DESC LIMIT @limit;
 
 -- func: count_pending
 SELECT COUNT(*) FROM questions WHERE session = @session AND retired = 0 AND answer IS NULL AND discuss_later = 0;
 
--- func: count_pending_for_root
+-- func: count_pending_all
 SELECT COUNT(*) FROM questions q JOIN sessions s ON s.id = q.session
-WHERE (s.id = @root_session_id OR s.root_session_id = @root_session_id OR s.parent_session_id = @root_session_id)
- AND q.retired = 0 AND q.answer IS NULL AND q.discuss_later = 0;
+WHERE q.retired = 0 AND q.answer IS NULL AND q.discuss_later = 0;
 
 -- func: edit_state
 SELECT session, question, choices, retired, replacement_of FROM questions WHERE id = @id;

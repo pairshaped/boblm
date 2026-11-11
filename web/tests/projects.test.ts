@@ -544,6 +544,7 @@ test("archived chat actions place Delete before fullscreen and deletion removes 
     "Reopen",
     "Delete chat",
     "Enter fullscreen",
+    "Open questions (0 unanswered)",
     "Open drawer",
   ]);
   handle.stop();
@@ -579,7 +580,7 @@ test("fullscreen sits between Archive and the drawer toggle and reflects browser
   assert.equal(button.getAttribute("aria-label"), "Exit fullscreen");
   assert.equal(
     button.nextElementSibling?.getAttribute("aria-label"),
-    "Open drawer",
+    "Open questions (0 unanswered)",
   );
   assert.equal(
     button.previousElementSibling?.getAttribute("aria-label"),

@@ -457,10 +457,10 @@ small {
 .sidebar-close {
   display: none;
 }
-.drawer-toggle {
+.questions-toggle {
   position: relative;
 }
-.drawer-toggle .count {
+.questions-toggle .count {
   position: absolute;
   top: 0;
   right: 0;
@@ -1594,4 +1594,16 @@ pre {
   color: var(--color-muted);
   font-size: var(--font-size-small);
   font-variant-numeric: tabular-nums;
+}
+
+.dialog.questions {
+  width: min(40rem, calc(100vw - 2rem));
+  max-width: 40rem;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+.questions > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }

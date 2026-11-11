@@ -31,6 +31,7 @@ export type EventPage = { readonly "cursor": Sequence; readonly "events": Readon
 export type ExpiredFrom = ("queued" | "uncertain");
 export type JobSnapshot = { readonly "available": boolean; readonly "tasks": ReadonlyArray<BackgroundJob>; };
 export type ListDirectories = { readonly "path"?: string | null; };
+export type ListQuestions = Readonly<Record<string, never>>;
 export type ListSessionsResponse = { readonly "cursor"?: Sequence; readonly "models": ReadonlyArray<ModelOption>; readonly "projects": ReadonlyArray<ProjectInfo>; readonly "sessions": ReadonlyArray<SessionInfo>; };
 export type MessageAppendedEvent = { readonly "attachments"?: ReadonlyArray<AttachmentInfo>; readonly "content": string; readonly "delivery_state": DeliveryState; readonly "expired_from"?: (ExpiredFrom | null); readonly "role": Role; readonly "sender_session_id"?: string | null; readonly "uuid": string; };
 export type ModelEffortChangedEvent = { readonly "effort"?: string | null; readonly "model": string; };
@@ -55,7 +56,7 @@ export type SendMessageResponse = { readonly "accepted": boolean; readonly "mess
 export type Sequence = number;
 export type SessionCreatedEvent = { readonly "id": string; readonly "parent_session_id"?: string | null; readonly "role"?: string | null; readonly "root_session_id"?: string | null; readonly "working_directory": string; };
 export type SessionInfo = { readonly "agent": Agent; readonly "agentSessionId"?: string | null; readonly "createdAt": number; readonly "name": string; readonly "parentSessionId"?: string | null; readonly "projectId": string; readonly "role"?: string | null; readonly "rootSessionId"?: string | null; readonly "sessionId": string; readonly "status": SessionStatus; readonly "subagents"?: (SubagentSummary | null); readonly "workingDirectory": string; };
-export type SessionListEvent = ({ readonly "createdAt": number; readonly "kind": "deleted"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "created"; readonly "payload": SessionCreatedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "renamed"; readonly "payload": SessionRenamedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "archived"; readonly "payload": ArchiveChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "state_summary"; readonly "payload": SessionStatus; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "subagents_changed"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; });
+export type SessionListEvent = ({ readonly "createdAt": number; readonly "kind": "deleted"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "created"; readonly "payload": SessionCreatedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "renamed"; readonly "payload": SessionRenamedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "archived"; readonly "payload": ArchiveChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "state_summary"; readonly "payload": SessionStatus; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "questions_changed"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "subagents_changed"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; });
 export type SessionRef = { readonly "sessionId": string; };
 export type SessionRenamedEvent = { readonly "name": string; };
 export type SessionStatus = { readonly "accountKey"?: string | null; readonly "accountUsage"?: (AccountUsage | null); readonly "archived": boolean; readonly "dispatching": number; readonly "effort"?: string | null; readonly "heldReason"?: string | null; readonly "jobs"?: (JobSnapshot | null); readonly "model": string; readonly "promptSuggestion"?: string | null; readonly "queueHeld": boolean; readonly "queued": number; readonly "rejected": number; readonly "running": boolean; readonly "selectionPending": boolean; readonly "stopping": boolean; readonly "turnActive": boolean; readonly "uncertain": number; readonly "usage"?: (UsageSnapshot | null); };
@@ -729,6 +730,10 @@ export const contractSchema = {
           ]
         }
       },
+      "type": "object"
+    },
+    "ListQuestions": {
+      "additionalProperties": false,
       "type": "object"
     },
     "ListSessionsResponse": {
@@ -1451,6 +1456,37 @@ export const contractSchema = {
             },
             "payload": {
               "$ref": "#/$defs/SessionStatus"
+            },
+            "seq": {
+              "$ref": "#/$defs/Sequence"
+            },
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "sessionId",
+            "seq",
+            "createdAt",
+            "payload"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A chat's questions changed, so the shared questions dialog must refresh.",
+          "properties": {
+            "createdAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "kind": {
+              "const": "questions_changed",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/Empty"
             },
             "seq": {
               "$ref": "#/$defs/Sequence"
@@ -2469,6 +2505,9 @@ export const contractSchema = {
     "list_directories": {
       "$ref": "#/$defs/ListDirectories"
     },
+    "list_questions": {
+      "$ref": "#/$defs/ListQuestions"
+    },
     "list_sessions": {
       "$ref": "#/$defs/ListSessionsResponse"
     },
@@ -2561,6 +2600,7 @@ export const contractSchema = {
     "chat_presence",
     "chat_presence_reply",
     "questions",
+    "list_questions",
     "answer_question",
     "discuss_question_later",
     "submit_secret",

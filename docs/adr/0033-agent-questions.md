@@ -14,33 +14,32 @@ Answered and deferred prompts cannot be revised; agents can delete them and ask 
 new question when another decision is needed.
 
 Identical update retries reuse the replacement ID and do not change the queue.
-Deleting a question removes it from the drawer, pending count and answer outbox.
+Deleting a question removes it from the dialog, pending count and answer outbox.
 Retired IDs remain reserved, so old create or update retries cannot restore deleted
 prompts. Pending push notices for retired prompts are suppressed. Deletion shares
 a lock with answer handoff: it either suppresses the pending answer or follows its
 handoff. Messages already handed to the runner remain in chat history.
 
-The Questions tab presents the viewed chat's unanswered prompts as a durable FIFO queue. It shows
-the current question and how many questions are waiting after it. The waiting line is hidden when
-there are none after the current question. There is no cap on how many unanswered questions can
-accumulate. Each response fetches the current prompt and recent decisions rather than downloading the
-whole backlog. Queue positions are allocated in the same transaction as each question, so questions
-created in the same millisecond still have a stable order. The queue survives reloads and restarts.
+The shared Questions modal presents unanswered prompts from all chats and subagents as a durable
+FIFO queue, ordered by creation time then question ID. Archived chats are included; deleted chats
+and retired questions are excluded. Each prompt shows its originating chat, with a subagent label
+and parent chat name when available. It shows the oldest pending question and how many are waiting.
+Recent answered and deferred decisions are bounded by the configured list limit.
 
 Suggested answers are radio buttons, followed by Discuss later and then Type a different answer,
 which opens a text field. Clicking a suggested answer or Discuss later anywhere in its label submits
 that decision immediately. Only a custom text answer needs Submit. A question without suggestions opens
 the text field directly. Answering advances to the next prompt.
 
-Questions and Agents share one right-hand drawer with tabs. One chat-header toggle opens and closes
-it, and tab changes preserve question drafts. It starts closed on a normal page load. The Questions tab is selected on page load; question
-notification links open it directly. Tabs show unanswered question and active agent counts. Both
-desktop side drawers are 320px wide. On phones the right drawer fills the screen, hiding the chat header. Its tabs and drawer toggle
-share a single header row. Desktop uses the toggle in the chat header.
+A dedicated question-mark button in the chat header, immediately before the drawer toggle, opens
+the modal and shows the global pending count. The right-hand drawer has Agents and Jobs tabs.
+The modal starts closed on normal loads. Question notification links open it and focus the question.
+Escape and Close dismiss it. Drafts persist across reloads and chat changes. Answers and discussion
+requests use the originating question's chat ID, independently of the viewed chat.
 
 Discuss later means: "I'm not sure. Let's discuss once there are no more open question prompts."
 It removes that question from the unanswered prompt queue without marking it answered. Its state is
-`discuss_later`, and its answer stays null. Deferred questions are kept out of the drawer.
+`discuss_later`, and its answer stays null. Deferred questions are kept out of the dialog.
 The discussion request is held durably until this chat has no unanswered prompts. Normal answers are
 handed off before discussion requests. The agent then receives the original question and the owner's
 request to discuss it. A discussion request is never fabricated as an answer.
@@ -53,7 +52,7 @@ the agent has read them. Further conversation about a deferred question happens 
 
 The scheduler drains pending decisions after restarts and during normal operation. Answering or
 requesting discussion is an owner action and can reopen an archived chat under the normal owner-message
-rules. Deleting a chat deletes its questions. Question changes publish a chat event; snapshots load
-independently of the bounded message-history window and refresh after its cursor is established.
+rules. Deleting a chat deletes its questions. Question changes publish both a chat event and a durable questions_changed list event. Global
+snapshots load after the list baseline and refresh on list events and reconnects.
 Browser request generations discard stale snapshots. Per-question text, choice and answer limits,
 and the number of recent decisions returned, live in tuning.

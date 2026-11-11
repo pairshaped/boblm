@@ -489,6 +489,16 @@ const run = async (dispatch: (msg: Msg) => void, effect: Effect) => {
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
     return;
   }
+  if (effect.type === "focusQuestions") {
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(
+          effect.open ? "#questions-dialog button" : "#open-questions",
+        )
+        ?.focus(),
+    );
+    return;
+  }
   if (effect.type === "focusQuestion") {
     requestAnimationFrame(() => {
       const question = document.getElementById(`question-${effect.id}`);
@@ -611,8 +621,7 @@ mountProgram({
       cachedList,
     ),
     fullscreen: !!document.fullscreenElement,
-    drawerOpen: deepLink.has("question"),
-    drawerTab: "questions",
+    questionsOpen: deepLink.has("question"),
     ...readQuestionDrafts(localStorage),
     questionToFocus: deepLink.get("question"),
   },

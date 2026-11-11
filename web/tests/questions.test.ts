@@ -12,12 +12,12 @@ const question = {
   answeredAt: null,
 };
 const base: Model = { ...initial("t"), active: "s", questions: [question] };
-test("question answers are scoped to the viewed chat and cannot be submitted twice in flight", () => {
+test("question answers route to their origin chat and cannot be submitted twice in flight", () => {
   const [open] = update(
     { ...base, drawerOpen: true, drawerTab: "agents" },
-    { type: "selectDrawerTab", tab: "questions" },
+    { type: "openQuestions" },
   );
-  assert.equal(open.drawerTab, "questions");
+  assert.equal(open.questionsOpen, true);
   assert.equal(open.drawerOpen, true);
   const [sending, effects] = update(open, {
     type: "answerQuestion",
@@ -32,12 +32,13 @@ test("question answers are scoped to the viewed chat and cannot be submitted twi
     update(sending, { type: "answerQuestion", id: "q1", answer: "Red" })[1],
     [],
   );
+  const [, otherEffects] = update(
+    { ...base, active: "t" },
+    { type: "answerQuestion", id: "q1", answer: "Blue" },
+  );
   assert.deepEqual(
-    update(
-      { ...base, active: "t" },
-      { type: "answerQuestion", id: "q1", answer: "Blue" },
-    )[1],
-    [],
+    otherEffects[0] && "body" in otherEffects[0] ? otherEffects[0].body : null,
+    { sessionId: "s", questionId: "q1", answer: "Blue" },
   );
 });
 test("lost answer replies keep the draft and never retry automatically", () => {
@@ -84,62 +85,26 @@ test("stale question snapshots cannot overwrite an answer", () => {
   assert.equal(stale.questions[0]?.answer, "Blue");
 });
 
-test("the history snapshot refreshes questions so changes behind the new SSE cursor cannot be missed", () => {
-  const [selected] = update(initial("t"), { type: "select", id: "s" });
-  const originalGeneration = selected.questionGeneration;
-  const [loaded, effects] = update(selected, {
-    type: "historyReply",
-    sessionId: "s",
-    generation: selected.history.s!.generation,
-    outcome: {
-      kind: "replied",
-      reply: {
-        sessionId: "s",
-        partialId: null,
-        status: {
-          selectionPending: false,
-          queueHeld: false,
-          running: false,
-          turnActive: false,
-          stopping: false,
-          queued: 0,
-          dispatching: 0,
-          uncertain: 0,
-          rejected: 0,
-          archived: false,
-          model: "sonnet",
-          effort: null,
-        },
-        cursor: 10,
-        events: [],
-        context: [],
-        hasMore: false,
-      },
+test("global list events refresh questions without an active chat", () => {
+  const [loaded, effects] = update(initial("t"), {
+    type: "listEvent",
+    event: {
+      kind: "questions_changed",
+      sessionId: "other",
+      seq: 1,
+      createdAt: 1,
+      payload: {},
     },
   });
-  assert.ok(loaded.questionGeneration > originalGeneration);
+  assert.equal(loaded.questionGeneration, 1);
   assert.ok(
-    effects.some((e) => e.type === "request" && e.name === "listQuestions"),
+    effects.some(
+      (e) =>
+        e.type === "request" &&
+        e.name === "listQuestions" &&
+        JSON.stringify(e.body) === "{}",
+    ),
   );
-  const [stale] = update(loaded, {
-    type: "reply",
-    name: "listQuestions",
-    sessionId: "s",
-    orderGeneration: originalGeneration,
-    outcome: { kind: "replied", reply: { pendingCount: 1, questions: [] } },
-  });
-  assert.equal(stale, loaded);
-  const [fresh] = update(loaded, {
-    type: "reply",
-    name: "listQuestions",
-    sessionId: "s",
-    orderGeneration: loaded.questionGeneration,
-    outcome: {
-      kind: "replied",
-      reply: { pendingCount: 1, questions: [question] },
-    },
-  });
-  assert.equal(fresh.questions[0]?.question, "Which color?");
 });
 
 test("discussing later records a separate decision and refreshes the queue without inventing an answer", () => {
@@ -195,9 +160,14 @@ test("answer labels submit immediately and only custom text needs Submit", async
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
   });
   const handle = mountProgram({
-    flags: { ...base, questionPendingCount: 73 },
+    flags: {
+      ...base,
+      active: "other",
+      questionsOpen: true,
+      questionPendingCount: 73,
+    },
     node: dom.window.document.querySelector<HTMLElement>("#app")!,
-    program: { ...program, view: questionsContent },
+    program,
   });
   try {
     await handle.settle();
@@ -208,6 +178,7 @@ test("answer labels submit immediately and only custom text needs Submit", async
           b.textContent === "Reload questions" || b.textContent === "Try again",
       ),
     );
+    assert.ok(doc.querySelector("#questions-dialog"));
     const radios = doc.querySelectorAll<HTMLInputElement>("input[type=radio]");
     assert.equal(radios.length, 4);
     assert.deepEqual(

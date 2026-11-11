@@ -210,8 +210,8 @@ impl Store {
         Ok(())
     }
 }
-impl From<sql::ListForRootRow> for Question {
-    fn from(row: sql::ListForRootRow) -> Self {
+impl From<sql::ListAllRow> for Question {
+    fn from(row: sql::ListAllRow) -> Self {
         Self {
             id: row.id,
             session: row.session,
@@ -238,12 +238,11 @@ impl crate::Reader {
         Ok(sql::owner_session(&self.conn, sql::OwnerSessionParams { id })?.pop())
     }
 
-    /// Questions belonging to a root and its subagents, with the first pending one per chat.
-    pub fn questions_for_root(&self, root_session_id: &str) -> Result<Vec<Question>> {
-        Ok(sql::list_for_root(
+    /// Global question queue, including the oldest pending question.
+    pub fn all_questions(&self) -> Result<Vec<Question>> {
+        Ok(sql::list_all(
             &self.conn,
-            sql::ListForRootParams {
-                root_session_id,
+            sql::ListAllParams {
                 limit: boblm_tuning::MAX_QUESTIONS_LIST,
             },
         )?
@@ -252,13 +251,8 @@ impl crate::Reader {
         .collect())
     }
 
-    pub fn pending_question_count_for_root(&self, root_session_id: &str) -> Result<i64> {
-        Ok(sql::count_pending_for_root(
-            &self.conn,
-            sql::CountPendingForRootParams { root_session_id },
-        )?
-        .pop()
-        .unwrap_or(0))
+    pub fn pending_question_count_all(&self) -> Result<i64> {
+        Ok(sql::count_pending_all(&self.conn)?.pop().unwrap_or(0))
     }
 
     pub fn pending_question_count(&self, session: &str) -> Result<i64> {
@@ -582,5 +576,33 @@ mod edit_tests {
                 .answer_question("deferred", "s", "Old answer", 8)
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod global_queue_tests {
+    #[test]
+    fn global_questions_order_by_creation_then_id_and_publish_list_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = crate::Store::open(temp.path().join("global.sqlite")).unwrap();
+        store.create_session("a", "/tmp", 1).unwrap();
+        store.create_session("b", "/tmp", 1).unwrap();
+        store.ask("z", "a", "Later ID?", &[], 10).unwrap();
+        store.ask("a", "b", "Earlier ID?", &[], 10).unwrap();
+        let reader = store.reader().unwrap();
+        assert_eq!(reader.all_questions().unwrap()[0].id, "a");
+        assert_eq!(reader.pending_question_count_all().unwrap(), 2);
+        let events = reader.session_list_since(0, 256).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.kind == "questions_changed")
+                .count(),
+            2
+        );
+        store.answer_question("a", "b", "Yes", 11).unwrap();
+        assert_eq!(reader.all_questions().unwrap()[0].id, "z");
+        store.delete_question("z", "a", 12).unwrap();
+        assert_eq!(reader.pending_question_count_all().unwrap(), 0);
     }
 }

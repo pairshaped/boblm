@@ -187,12 +187,12 @@ test("the shared drawer stays usable with no agents and no questions", async () 
     doc.querySelector<HTMLButtonElement>(".drawer-toggle")!.disabled,
     false,
   );
-  doc.querySelector<HTMLButtonElement>("#drawer-tab-questions")!.click();
+  doc.querySelector<HTMLButtonElement>("#drawer-tab-jobs")!.click();
   await handle.settle();
-  assert.equal(handle.model().drawerTab, "questions");
+  assert.equal(handle.model().drawerTab, "jobs");
   assert.match(
     doc.querySelector('[role="tabpanel"]')!.textContent!,
-    /No unanswered questions/,
+    /Background job status is unavailable/,
   );
   const mobileToggle = doc.querySelector<HTMLButtonElement>(
     ".subagents > header .mobile-drawer-toggle",
@@ -214,7 +214,7 @@ test("tabs preserve question drafts and the selected tab survives closing and re
     questionDrafts: { q1: "My draft" },
   });
   const doc = dom.window.document;
-  doc.querySelector<HTMLButtonElement>("#drawer-tab-questions")!.click();
+  doc.querySelector<HTMLButtonElement>("#drawer-tab-jobs")!.click();
   await handle.settle();
   doc.querySelector<HTMLButtonElement>("#drawer-tab-agents")!.click();
   await handle.settle();
@@ -235,8 +235,8 @@ test("tabs preserve question drafts and the selected tab survives closing and re
     }),
   );
   await handle.settle();
-  assert.equal(handle.model().drawerTab, "questions");
-  assert.equal(doc.activeElement?.id, "drawer-tab-questions");
+  assert.equal(handle.model().drawerTab, "jobs");
+  assert.equal(doc.activeElement?.id, "drawer-tab-jobs");
   handle.stop();
   dom.window.close();
 });
@@ -305,7 +305,7 @@ test("running agents have animated dots, and clicking opens a read-only chat und
     doc.querySelector(".subagent-titlebar strong")!.textContent,
     "Check the lock query cache",
   );
-  assert.ok(doc.querySelector("#drawer-tab-questions"));
+  assert.ok(doc.querySelector("#drawer-tab-jobs"));
   assert.ok(doc.querySelector("#drawer-tab-agents"));
   assert.equal(doc.querySelector(".subagent-conversation textarea"), null);
   doc
@@ -319,9 +319,9 @@ test("running agents have animated dots, and clicking opens a read-only chat und
     )!
     .click();
   await handle.settle();
-  doc.querySelector<HTMLButtonElement>("#drawer-tab-questions")!.click();
+  doc.querySelector<HTMLButtonElement>("#drawer-tab-jobs")!.click();
   await handle.settle();
-  assert.equal(handle.model().drawerTab, "questions");
+  assert.equal(handle.model().drawerTab, "jobs");
   doc.querySelector<HTMLButtonElement>("#drawer-tab-agents")!.click();
   await handle.settle();
   assert.equal(handle.model().subagentConversation, null);
@@ -593,7 +593,7 @@ test("jobs survive empty history, keep completed agents waiting, and cap visible
   );
   assert.deepEqual(
     [...doc.querySelectorAll('[role="tab"]')].map((t) => t.id),
-    ["drawer-tab-agents", "drawer-tab-jobs", "drawer-tab-questions"],
+    ["drawer-tab-agents", "drawer-tab-jobs"],
   );
   doc.querySelector<HTMLButtonElement>("#drawer-tab-jobs")!.click();
   await handle.settle();

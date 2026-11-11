@@ -110,7 +110,7 @@ async fn questions_return_immediately_and_answers_require_a_lifecycle_ack() {
         received.try_recv().is_err(),
         "asking does not start an agent"
     );
-    let (_, listed) = command(&router, "listQuestions", json!({"sessionId":"s"})).await;
+    let (_, listed) = command(&router, "listQuestions", json!({})).await;
     assert_eq!(listed["questions"][0]["question"], "Which color?");
     assert_eq!(
         command(
@@ -353,7 +353,7 @@ async fn question_tools_revise_delete_validate_and_reject_other_chats() {
                 .unwrap();
         assert_eq!(receipt["questionId"], REVISED);
     }
-    let (_, listed) = command(&router, "listQuestions", json!({"sessionId":"s"})).await;
+    let (_, listed) = command(&router, "listQuestions", json!({})).await;
     assert_eq!(listed["pendingCount"], 1);
     assert_eq!(listed["questions"][0]["question"], "Revised?");
     assert_eq!(listed["questions"][0]["choices"], json!(["No"]));
@@ -387,7 +387,7 @@ async fn question_tools_revise_delete_validate_and_reject_other_chats() {
         question_tool(&router, "s", "update_question", update).await["result"]["isError"],
         false
     );
-    let (_, listed) = command(&router, "listQuestions", json!({"sessionId":"s"})).await;
+    let (_, listed) = command(&router, "listQuestions", json!({})).await;
     assert_eq!(listed["pendingCount"], 0);
     assert_eq!(listed["questions"], json!([]));
     app.deliver_question_answers().await;
@@ -396,4 +396,67 @@ async fn question_tools_revise_delete_validate_and_reject_other_chats() {
         "question tools must not start an agent"
     );
     app.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn global_questions_route_answers_to_each_origin_chat() {
+    struct GlobalFactory(std::sync::Mutex<std::collections::HashMap<String, Fake>>);
+    #[async_trait]
+    impl DriverFactory for GlobalFactory {
+        async fn spawn(&self, session: &Session) -> io::Result<Box<dyn Driver>> {
+            Ok(Box::new(
+                self.0.lock().unwrap().remove(&session.id).unwrap(),
+            ))
+        }
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("global.sqlite")).unwrap();
+    for session in ["first", "second"] {
+        store.create_session(session, "/tmp", 1).unwrap();
+    }
+    let first = "30000000-0000-4000-8000-000000000010";
+    let second = "30000000-0000-4000-8000-000000000011";
+    store.ask(first, "first", "First?", &[], 1).unwrap();
+    store.ask(second, "second", "Second?", &[], 2).unwrap();
+    let mut children = std::collections::HashMap::new();
+    let mut receivers = Vec::new();
+    let mut emitters = Vec::new();
+    for session in ["first", "second"] {
+        let (emit, events) = mpsc::unbounded_channel();
+        let (inputs, received) = mpsc::unbounded_channel();
+        children.insert(session.to_owned(), Fake { events, inputs });
+        receivers.push(received);
+        emitters.push(emit);
+    }
+    let app = App::open(
+        store.clone(),
+        Arc::new(GlobalFactory(std::sync::Mutex::new(children))),
+        TOKEN.into(),
+    )
+    .await
+    .unwrap();
+    let router = app.router(None);
+    for (id, session, count) in [(first, "first", 2), (second, "second", 1)] {
+        let (status, listed) = command(&router, "listQuestions", json!({})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["pendingCount"], count);
+        assert_eq!(listed["questions"][0]["id"], id);
+        assert_eq!(listed["questions"][0]["sessionId"], session);
+        let (status, reply) = command(
+            &router,
+            "answerQuestion",
+            json!({"sessionId":session, "questionId":id, "answer":"Yes"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(reply["pendingCount"], count - 1);
+    }
+    for (index, expected) in [first, second].into_iter().enumerate() {
+        let input = tokio::time::timeout(Duration::from_secs(3), receivers[index].recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(input.content.contains(expected));
+        assert!(input.content.contains("Yes"));
+    }
 }
