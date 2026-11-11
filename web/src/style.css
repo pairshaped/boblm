@@ -1594,8 +1594,8 @@ pre {
 }
 
 .dialog.questions {
-  width: 80vw;
-  height: 80dvh;
+  width: 90vw;
+  height: 90dvh;
   /* The header stays put and only the question content scrolls. */
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
