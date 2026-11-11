@@ -122,6 +122,7 @@ pub struct App {
     pub(crate) browser_reloads: std::sync::Mutex<crate::browser_reload::BrowserReloads>,
     /// Held while a due occurrence is settled and while a schedule is cancelled.
     pub(crate) schedule_claim: tokio::sync::Mutex<()>,
+    claude_accounts: std::sync::Mutex<crate::claude_account::EnabledAccounts>,
     role_subagents_enabled: std::sync::atomic::AtomicBool,
     pub(crate) subagent_prune_at: std::sync::atomic::AtomicI64,
 }
@@ -162,9 +163,31 @@ impl App {
             role_subagents_enabled: std::sync::atomic::AtomicBool::new(
                 boblm_tuning::ROLE_SUBAGENTS_ENABLED,
             ),
+            claude_accounts: std::sync::Mutex::new(Default::default()),
             subagent_prune_at: std::sync::atomic::AtomicI64::new(0),
         }))
     }
+    pub(crate) fn claude_accounts(&self) -> crate::claude_account::EnabledAccounts {
+        *self
+            .claude_accounts
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Test seam: production defaults to the enabled account lists in tuning.
+    #[doc(hidden)]
+    pub fn set_claude_accounts_for_tests(
+        &self,
+        plan: &'static [&'static str],
+        api: &'static [&'static str],
+    ) {
+        *self
+            .claude_accounts
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) =
+            crate::claude_account::EnabledAccounts { plan, api };
+    }
+
     pub(crate) fn role_subagents_enabled(&self) -> bool {
         self.role_subagents_enabled
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -756,6 +779,7 @@ async fn create_session(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<
         check_choice(&request.model, request.effort.as_deref()).map_err(ApiError::invalid)?;
     let project_id = boblm_runner::canonical_uuid(&request.project_id)?;
     let mut registry = app.sessions.lock().await;
+    let enabled = app.claude_accounts();
     let (store, id) = (app.store.clone(), request.session_id.clone());
     let session = tokio::task::spawn_blocking(move || -> Result<Session, ApiError> {
         let reader = store.reader()?;
@@ -780,7 +804,7 @@ async fn create_session(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<
             )));
         }
         let account_key = if agent.as_str() == "claude" {
-            Some(crate::claude_account::choose_plan(&store, crate::schedule::now_ms() / 1000).map_err(ApiError::invalid)?)
+            Some(crate::claude_account::choose_plan(&store, enabled.plan, crate::schedule::now_ms() / 1000).map_err(ApiError::invalid)?)
         } else { None };
         store.create_session_on_account(boblm_store::NewSession {
             name: &request.name,

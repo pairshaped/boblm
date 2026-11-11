@@ -1,4 +1,5 @@
 //! Role routing inputs and spawn helpers for role-based subagents (ADR 0043).
+pub use crate::claude_account::EnabledAccounts;
 use boblm_protocol::client::SessionInfo;
 use boblm_store::{Session, Store};
 use boblm_tuning::{
@@ -76,6 +77,7 @@ pub fn resolve_route(
     store: &Store,
     role: Role,
     difficulty: Difficulty,
+    enabled: EnabledAccounts,
 ) -> Result<ChosenRoute, String> {
     let reader = store
         .reader()
@@ -125,7 +127,7 @@ pub fn resolve_route(
         });
     }
     let now_ms = unix_millis();
-    let accounts = crate::claude_account::plan_accounts(store, boblm_tuning::CLAUDE_PLAN_ACCOUNTS)?;
+    let accounts = crate::claude_account::plan_accounts(store, enabled.plan)?;
     let plan = boblm_tuning::claude_accounts::choose(&accounts, now_ms / 1000);
     readings.push(AccountReading {
         account: AccountKind::ClaudePlan,
@@ -135,7 +137,7 @@ pub fn resolve_route(
         weekly_resets_at: plan.and_then(|account| account.resets_at),
         credits_balance: None,
     });
-    let api = crate::claude_account::choose_api(store, now_ms / 1000)?;
+    let api = crate::claude_account::choose_api_from(store, enabled.api, now_ms / 1000)?;
     let mut exhausted = exhausted;
     // New quota failures mark individual Claude API accounts. Retain a legacy global
     // mark for A until its original expiry, without blocking a newly enabled B.

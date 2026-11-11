@@ -6,6 +6,22 @@ use std::{
 };
 use tokio::process::Command;
 
+/// Enabled Claude accounts for one server instance.
+#[derive(Clone, Copy)]
+pub struct EnabledAccounts {
+    pub plan: &'static [&'static str],
+    pub api: &'static [&'static str],
+}
+
+impl Default for EnabledAccounts {
+    fn default() -> Self {
+        Self {
+            plan: CLAUDE_PLAN_ACCOUNTS,
+            api: CLAUDE_API_ACCOUNTS,
+        }
+    }
+}
+
 pub fn is_api(key: &str) -> bool {
     matches!(key, CLAUDE_ACCOUNT_KEY_API_A | CLAUDE_ACCOUNT_KEY_API_B)
 }
@@ -159,20 +175,20 @@ pub fn handoff_target(
     }))
 }
 
-pub fn choose_plan(store: &boblm_store::Store, now: i64) -> Result<&'static str, String> {
-    if let [key] = CLAUDE_PLAN_ACCOUNTS {
+pub fn choose_plan(
+    store: &boblm_store::Store,
+    enabled: &[&'static str],
+    now: i64,
+) -> Result<&'static str, String> {
+    if let [key] = enabled {
         return Ok(key);
     }
-    let accounts = plan_accounts(store, CLAUDE_PLAN_ACCOUNTS)?;
+    let accounts = plan_accounts(store, enabled)?;
     claude_accounts::choose_for_owner(&accounts, now).map(|account| account.key)
         .ok_or_else(|| "No Claude plan accounts are enabled. Add an account to CLAUDE_PLAN_ACCOUNTS in crates/tuning and rebuild BobLM.".into())
 }
 
-pub fn choose_api(store: &boblm_store::Store, now: i64) -> Result<Option<&'static str>, String> {
-    choose_api_from(store, CLAUDE_API_ACCOUNTS, now)
-}
-
-fn choose_api_from(
+pub fn choose_api_from(
     store: &boblm_store::Store,
     enabled: &[&'static str],
     now: i64,

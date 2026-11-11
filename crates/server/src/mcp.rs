@@ -382,8 +382,9 @@ async fn spawn_role(
         let store = store.clone();
         let role = request.role;
         let difficulty = request.difficulty;
+        let enabled = app.claude_accounts();
         tokio::task::spawn_blocking(move || {
-            crate::role_spawn::resolve_route(&store, role, difficulty)
+            crate::role_spawn::resolve_route(&store, role, difficulty, enabled)
         })
         .await
         .map_err(|error| format!("Could not resolve the role: {error}."))??
@@ -879,12 +880,13 @@ impl Peers {
             let account_key = if agent.as_str() == "claude" {
                 let store = self.app.store.clone();
                 let id = args.request_id.clone();
+                let enabled = self.app.claude_accounts();
                 tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
                     let reader = store.reader().map_err(|error| error.to_string())?;
                     if reader.peer_spawn_receipt(&id).map_err(|error| error.to_string())?.is_some() {
                         return Ok(reader.sessions().map_err(|error| error.to_string())?.into_iter().find(|session| session.id == id).and_then(|session| session.account_key));
                     }
-                    crate::claude_account::choose_plan(&store, created_at / 1000).map(|key| Some(key.into()))
+                    crate::claude_account::choose_plan(&store, enabled.plan, created_at / 1000).map(|key| Some(key.into()))
                 }).await.map_err(|error| format!("Could not choose a Claude account: {error}. Try again after storage is available."))??
             } else { None };
             let (session,created)=self.app.spawn_peer(boblm_store::PeerSpawn{request_id:args.request_id.clone(),caller,arguments,project_id:project.id.clone(),agent:agent.as_str().into(),model:model.to_owned(),effort:effort.to_owned(),title:args.title,content,created_at,parent_session_id:None,root_session_id:None,role:None,resolved:None,working_directory:None,account_key}).await?;

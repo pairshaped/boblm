@@ -1006,6 +1006,10 @@ async fn spawn_requires_model_and_effort_and_inherits_directory_only() {
     }))));
     let token = "peer-test-owner-token-only";
     let app = App::open(store, factory, token.into()).await.unwrap();
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
     let router = app.router(Some(temp.path().into()));
     let id = "00000000-0000-4000-8000-000000000003";
     let args = serde_json::json!({"title":"Spawned chat","requestId":id,"message":"Do this independently","model":"opus","effort":"high"});
@@ -1078,6 +1082,10 @@ async fn role_spawn_surface_follows_the_cutover_gate() {
     let factory = Arc::new(SpawnFactory { inputs });
     let token = "peer-test-owner-token-only";
     let app = App::open(store, factory, token.into()).await.unwrap();
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
     let router = app.router(Some(temp.path().into()));
     let names = tool_names(&router, token, "caller").await;
     assert!(
@@ -1171,6 +1179,10 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
         .await
         .unwrap();
     app.set_role_subagents_enabled_for_tests(true);
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
     let router = app.router(Some(temp.path().into()));
     let first_id = "00000000-0000-4000-8000-000000000101";
     let args = serde_json::json!({"title":"Spawned chat","requestId":first_id,"message":"implement this","role":"implementer","difficulty":"simple"});
@@ -1496,6 +1508,10 @@ async fn role_resolver_skips_a_step_with_an_active_exhaustion_mark() {
     let token = "peer-test-owner-token-only";
     let app = App::open(store, factory, token.into()).await.unwrap();
     app.set_role_subagents_enabled_for_tests(true);
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
     let router = app.router(Some(temp.path().into()));
     let reply = tool_value(
         &call(
@@ -1523,6 +1539,10 @@ async fn role_spawn_peer_creates_a_visible_root_with_the_resolved_choice() {
     let token = "peer-test-owner-token-only";
     let app = App::open(store, factory, token.into()).await.unwrap();
     app.set_role_subagents_enabled_for_tests(true);
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
     let router = app.router(Some(temp.path().into()));
     let id = "00000000-0000-4000-8000-000000000201";
     let args = serde_json::json!({"title":"Spawned chat","requestId":id,"message":"implement this","role":"implementer","difficulty":"hard"});
@@ -2118,6 +2138,10 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
     )
     .await
     .unwrap();
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
     let router = app.router(Some(temp.path().into()));
     let args = |id: u64| {
         serde_json::json!({
@@ -2280,6 +2304,10 @@ async fn planner_spawn_routes_to_opus_without_difficulty() {
     .await
     .unwrap();
     app.set_role_subagents_enabled_for_tests(true);
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
     let router = app.router(Some(temp.path().into()));
     for (tool, id) in [
         ("spawn_subagent", "00000000-0000-4000-8000-000000000801"),
@@ -2576,6 +2604,10 @@ fn claude_api_usage_never_becomes_a_subscription_reading_without_a_keyed_chat() 
         &store,
         boblm_tuning::Role::Planner,
         boblm_tuning::Difficulty::Simple,
+        boblm_server::role_spawn::EnabledAccounts {
+            plan: &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+            api: &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+        },
     );
     assert!(
         outcome.is_err(),
@@ -2602,6 +2634,10 @@ async fn claude_spawns_choose_independently_of_a_parent_pinned_to_plan_b() {
     .await
     .unwrap();
     app.set_role_subagents_enabled_for_tests(true);
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
     let router = app.router(Some(temp.path().into()));
     for (tool, id, extra) in [
         (
@@ -2663,6 +2699,21 @@ async fn claude_spawns_choose_independently_of_a_parent_pinned_to_plan_b() {
     assert_eq!(
         role["result"]["isError"], true,
         "Role spawns still enforce the cutoff: {role}"
+    );
+    app.set_claude_accounts_for_tests(
+        &[
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A,
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B,
+        ],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
+    let role = call(&router, "independent-test-token", "caller", "spawn_subagent", serde_json::json!({
+        "title":"Planner on B", "requestId":"4eb2fc93-eac7-49d3-bb21-1394f8a6a45b", "message":"Plan work", "role":"planner"
+    })).await;
+    assert_eq!(role["result"]["isError"], false, "{role}");
+    assert_eq!(
+        tool_value(&role)["routing"]["account"],
+        boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B
     );
     app.shutdown().await.unwrap();
 }
