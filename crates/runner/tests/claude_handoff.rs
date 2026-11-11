@@ -243,6 +243,7 @@ async fn wait(client: &SessionHandle, predicate: impl Fn(&boblm_runner::Status) 
 #[tokio::test]
 async fn claude_handoff_waits_for_turn_and_jobs_then_resumes_the_same_conversation() {
     let mut h = Harness::new(true);
+    h.store.set_claude_account_key("s", A).unwrap();
     let runner = h.start().await;
     let client = runner.handle();
     client
@@ -346,10 +347,25 @@ async fn claude_handoff_waits_for_turn_and_jobs_then_resumes_the_same_conversati
             .used_percent,
         12.0
     );
-    // Handoff events remain readable through the public typed event boundary.
-    boblm_runner::events::cursor_page(&client, "s", boblm_protocol::client::Sequence(0), 256)
-        .await
-        .unwrap();
+    // Both snapshots and durable summaries expose the account change.
+    let page =
+        boblm_runner::events::cursor_page(&client, "s", boblm_protocol::client::Sequence(0), 256)
+            .await
+            .unwrap();
+    assert_eq!(page.status.account_key.as_deref(), Some(B));
+    let keys: Vec<_> = page
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            boblm_protocol::client::StoredEvent::StateSummary { payload, .. } => {
+                payload.account_key.as_deref()
+            }
+            _ => None,
+        })
+        .collect();
+    let first_a = keys.iter().position(|key| *key == A).unwrap();
+    let first_b = keys.iter().position(|key| *key == B).unwrap();
+    assert!(first_a < first_b);
     runner.shutdown().await.unwrap();
 }
 

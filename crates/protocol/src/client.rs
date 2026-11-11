@@ -615,6 +615,9 @@ fn uuid_like(value: &str) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SessionStatus {
+    /// Stored provider account key; absent Claude keys mean plan A.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_key: Option<String>,
     /// Latest provider prediction; transient and absent when unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_suggestion: Option<String>,

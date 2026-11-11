@@ -231,6 +231,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     publish(&root.join("web/src/generated/contract.ts"), &output, check)?;
     let status = SessionStatus {
+        account_key: Some("claude-plan-a".into()),
         prompt_suggestion: None,
         jobs: None,
         usage: None,

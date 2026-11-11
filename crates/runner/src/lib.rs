@@ -60,6 +60,8 @@ pub fn canonical_uuid(value: &str) -> Result<String> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
+    #[serde(default)]
+    pub account_key: Option<String>,
     /// Latest provider prediction; transient and absent when unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_suggestion: Option<String>,
@@ -650,6 +652,7 @@ impl Actor {
         let selection_pending =
             session.applied_model != session.model || session.applied_effort != session.effort;
         Ok(Status {
+            account_key: session.account_key,
             prompt_suggestion: self.prompt_suggestion.clone(),
             jobs: self.jobs.clone(),
             usage,

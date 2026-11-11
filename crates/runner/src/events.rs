@@ -7,6 +7,7 @@ pub fn wire_status(status: Status) -> Result<SessionStatus> {
         u32::try_from(n).map_err(|_| Error::Invalid("delivery count exceeds wire range".into()))
     };
     Ok(SessionStatus {
+        account_key: status.account_key,
         prompt_suggestion: status.prompt_suggestion,
         jobs: status.jobs,
         usage: status.usage,

@@ -4434,7 +4434,7 @@ export function view(model: Model): VNode<Model> {
                                 : "span",
                               {
                                 class: `shortcut agent-${s.agent}`,
-                                "aria-label": `${agentName(s.agent)}, chat ${numbers.get(s.sessionId)}`,
+                                "aria-label": `${sessionAgentName(s.agent, s.status.accountKey)}, chat ${numbers.get(s.sessionId)}`,
                                 ...((numbers.get(s.sessionId) ?? 10) <= 9
                                   ? {
                                       title: `Command+${numbers.get(s.sessionId)} (Alt+${numbers.get(s.sessionId)} off a Mac)`,
@@ -4503,7 +4503,13 @@ export function view(model: Model): VNode<Model> {
                 ),
               )
             : null,
-          session ? h("small", {}, agentName(session.agent)) : null,
+          session
+            ? h(
+                "small",
+                {},
+                sessionAgentName(session.agent, session.status.accountKey),
+              )
+            : null,
         ),
         session
           ? h(
@@ -5415,6 +5421,16 @@ function secretCard(r: SecretRequest, agent: string): VNode<Model> {
       h("button", { type: "submit" }, "Save"),
     ),
   );
+}
+export function sessionAgentName(
+  agent: string,
+  accountKey?: string | null,
+): string {
+  if (agent !== "claude") return agentName(agent);
+  const letter =
+    accountKey === "claude-plan-b" || accountKey === "claude-api-b" ? "B" : "A";
+  const api = accountKey === "claude-api-a" || accountKey === "claude-api-b";
+  return `Claude ${letter}${api ? " (API)" : ""}`;
 }
 const agentName = (agent: string) =>
   agent === "pi" ? "Pi" : agent === "codex" ? "Codex" : "Claude";

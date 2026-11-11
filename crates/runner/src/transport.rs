@@ -156,6 +156,7 @@ impl RunningSession {
                     .count()
             };
             Ok::<_, Error>(Status {
+                account_key: row.account_key,
                 prompt_suggestion: None,
                 jobs: Some(Default::default()),
                 usage: None,

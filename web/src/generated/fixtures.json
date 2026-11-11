@@ -282,6 +282,7 @@
           "projectId": "20000000-0000-4000-8000-000000000001",
           "sessionId": "s",
           "status": {
+            "accountKey": "claude-plan-a",
             "accountUsage": {
               "accountId": "account-1",
               "credits": {
@@ -331,6 +332,7 @@
       "projectId": "20000000-0000-4000-8000-000000000001",
       "sessionId": "s",
       "status": {
+        "accountKey": "claude-plan-a",
         "accountUsage": {
           "accountId": "account-1",
           "credits": {
@@ -372,6 +374,7 @@
     "type": "CommandResponse",
     "value": {
       "status": {
+        "accountKey": "claude-plan-a",
         "accountUsage": {
           "accountId": "account-1",
           "credits": {
@@ -408,6 +411,7 @@
       "accepted": false,
       "messageId": "00000000-0000-4000-8000-000000000001",
       "status": {
+        "accountKey": "claude-plan-a",
         "accountUsage": {
           "accountId": "account-1",
           "credits": {
@@ -456,6 +460,7 @@
       "partialId": null,
       "sessionId": "s",
       "status": {
+        "accountKey": "claude-plan-a",
         "accountUsage": {
           "accountId": "account-1",
           "credits": {
@@ -506,6 +511,7 @@
       "hasMore": false,
       "sessionId": "s",
       "status": {
+        "accountKey": "claude-plan-a",
         "accountUsage": {
           "accountId": "account-1",
           "credits": {
@@ -579,6 +585,7 @@
       "createdAt": 1,
       "kind": "state_summary",
       "payload": {
+        "accountKey": "claude-plan-a",
         "accountUsage": {
           "accountId": "account-1",
           "credits": {
@@ -627,6 +634,7 @@
       "createdAt": 1,
       "kind": "state_summary",
       "payload": {
+        "accountKey": "claude-plan-a",
         "accountUsage": {
           "accountId": "account-1",
           "credits": {

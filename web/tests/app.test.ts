@@ -2,7 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { mountProgram } from "@pairshaped/hypertea/testing";
-import { initial, program, chatRows, update, type Model } from "../src/app.ts";
+import {
+  initial,
+  program,
+  chatRows,
+  sessionAgentName,
+  update,
+  type Model,
+} from "../src/app.ts";
 import type { SessionInfo, StoredEvent } from "../src/generated/contract.ts";
 const session: SessionInfo = {
   name: "",
@@ -27,7 +34,7 @@ const session: SessionInfo = {
     effort: null,
   },
 };
-async function fixture() {
+async function fixture(withProject = false) {
   const dom = new JSDOM('<div id="app"></div>', {
     pretendToBeVisual: true,
     url: "http://localhost",
@@ -47,6 +54,9 @@ async function fixture() {
   const model: Model = {
     ...initial("fixture-token"),
     sessions: [session],
+    projects: withProject
+      ? [{ projectId: "p1", name: "Test", path: "/local", createdAt: 1 }]
+      : [],
     models: [
       {
         model: "sonnet",
@@ -560,4 +570,55 @@ test("prompt suggestions show only in empty idle composer and Tab accepts a draf
     new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
   );
   assert.equal(field.value, "");
+});
+
+test("session agent labels identify Claude accounts and preserve other agents", () => {
+  for (const [key, expected] of [
+    ["claude-plan-a", "Claude A"],
+    ["claude-plan-b", "Claude B"],
+    ["claude-api-a", "Claude A (API)"],
+    ["claude-api-b", "Claude B (API)"],
+    [undefined, "Claude A"],
+    [null, "Claude A"],
+  ] as const) {
+    assert.equal(sessionAgentName("claude", key), expected);
+    assert.equal(sessionAgentName("codex", key), "Codex");
+    assert.equal(sessionAgentName("pi", key), "Pi");
+  }
+});
+
+test("live account summaries update the chat header and sidebar label", async () => {
+  const { dom, handle } = await fixture(true);
+  try {
+    for (const [index, accountKey] of [
+      "claude-plan-a",
+      "claude-plan-b",
+      "claude-api-a",
+      "claude-api-b",
+    ].entries()) {
+      handle.dispatch({
+        type: "event",
+        event: {
+          kind: "state_summary",
+          sessionId: "s",
+          seq: index + 1,
+          createdAt: 1,
+          payload: { ...session.status, accountKey },
+        },
+      });
+      await handle.settle();
+      const label = sessionAgentName("claude", accountKey);
+      assert.ok(
+        [...dom.window.document.querySelectorAll("small")].some(
+          (node) => node.textContent === label,
+        ),
+      );
+      assert.ok(
+        dom.window.document.querySelector(`[aria-label="${label}, chat 1"]`),
+      );
+    }
+  } finally {
+    handle.stop();
+    dom.window.close();
+  }
 });
