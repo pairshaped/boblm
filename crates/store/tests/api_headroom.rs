@@ -1,4 +1,4 @@
-use boblm_store::{PeerSpawn, Store};
+use boblm_store::Store;
 use boblm_tuning::{ApiHeadroom, CODEX_ACCOUNT_KEY_API, CODEX_ACCOUNT_KEY_PLAN, MODEL_GPT_6_LUNA};
 use serde_json::json;
 
@@ -14,26 +14,25 @@ fn api_headroom_counts_cached_tokens_and_only_projects_mid_turn_api_reviewers() 
         .unwrap();
     let now = 1_000_000;
     let spawn = |id: &str, key: &str, role: &str, created_at: i64| {
+        // Owner operations may create fixture states above any agent-spawn cap.
         store
-            .spawn_peer(PeerSpawn {
-                request_id: id.into(),
-                caller: "root".into(),
-                arguments: json!({"requestId":id}).to_string(),
-                project_id: project.clone(),
-                agent: "codex".into(),
-                model: MODEL_GPT_6_LUNA.into(),
-                effort: "xhigh".into(),
-                title: id.into(),
-                content: "work".into(),
+            .create_session_in(boblm_store::NewSession {
+                id,
+                project_id: &project,
+                name: id,
+                agent: "codex",
+                model: MODEL_GPT_6_LUNA,
+                effort: Some("xhigh"),
                 created_at,
-                parent_session_id: None,
-                root_session_id: None,
-                role: Some(role.into()),
-                resolved: None,
-                working_directory: None,
-                account_key: Some(key.into()),
             })
             .unwrap();
+        store.set_claude_account_key(id, key).unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE sessions SET role = ?1 WHERE id = ?2",
+            rusqlite::params![role, id],
+        )
+        .unwrap();
     };
     spawn("busy", CODEX_ACCOUNT_KEY_API, "reviewer", 1);
     spawn("recent", CODEX_ACCOUNT_KEY_API, "reviewer", 1);

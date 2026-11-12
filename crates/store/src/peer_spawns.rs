@@ -31,7 +31,26 @@ pub struct PeerSpawnReceipt {
     pub resolved: Option<String>,
 }
 
+fn provider_counts(conn: &rusqlite::Connection) -> crate::Result<boblm_tuning::ProviderCounts> {
+    let mut counts = boblm_tuning::ProviderCounts::default();
+    for row in sql::open_provider_members(conn)? {
+        if let Some(group) =
+            boblm_tuning::provider_group(&row.agent, &row.model, row.account_key.as_deref())
+        {
+            counts.add(group);
+            if row.role.as_deref() == Some("reviewer") {
+                counts.add_reviewer(group);
+            }
+        }
+    }
+    Ok(counts)
+}
+
 impl crate::Reader {
+    pub fn open_provider_counts(&self) -> crate::Result<boblm_tuning::ProviderCounts> {
+        provider_counts(&self.conn)
+    }
+
     pub fn peer_spawn_receipt(&self, request_id: &str) -> crate::Result<Option<PeerSpawnReceipt>> {
         Ok(sql::lookup(&self.conn, sql::LookupParams { request_id })?
             .pop()
@@ -93,20 +112,17 @@ impl crate::Store {
                         .into(),
                 ));
             }
-            let open = crate::sessions::sql::open_subagents(
-                &tx,
-                crate::sessions::sql::OpenSubagentsParams {
-                    root_session_id: parent.root_session_id,
-                },
-            )?
-            .pop()
-            .unwrap_or(0);
-            if open >= i64::try_from(boblm_tuning::MAX_OPEN_SUBAGENTS_PER_ROOT).unwrap_or(i64::MAX)
+        }
+        if let Some(group) = boblm_tuning::provider_group(
+            &request.agent,
+            &request.model,
+            request.account_key.as_deref(),
+        ) {
+            let counts = provider_counts(&tx)?;
+            if let Some(reason) =
+                counts.spawn_rejection(group, request.role.as_deref() == Some("reviewer"))
             {
-                return Err(crate::Error::Subagent(format!(
-                    "This root already has {} open subagents, the most it may have. Archive one before starting another.",
-                    boblm_tuning::MAX_OPEN_SUBAGENTS_PER_ROOT
-                )));
+                return Err(crate::Error::Subagent(reason));
             }
         }
         crate::sessions::insert_with_parent(

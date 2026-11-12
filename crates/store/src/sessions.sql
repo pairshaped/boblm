@@ -53,9 +53,6 @@ ORDER BY seq DESC LIMIT 1;
 -- func: subagents
 SELECT id FROM sessions WHERE root_session_id = @root_session_id OR parent_session_id = @root_session_id ORDER BY created_at, id;
 
--- func: open_subagents
-SELECT COUNT(*) AS count FROM sessions WHERE root_session_id = @root_session_id AND archived = 0;
-
 -- func: subagent_summary
 SELECT
  (SELECT COUNT(*) FROM sessions c

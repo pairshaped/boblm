@@ -3,3 +3,8 @@ SELECT caller, arguments, resolved FROM peer_spawn_requests WHERE request_id = @
 
 -- func: receipt
 INSERT INTO peer_spawn_requests (request_id, caller, arguments, resolved) VALUES (@request_id, @caller, @arguments, @resolved);
+
+-- func: open_provider_members
+SELECT s.account_key, s.agent, s.model, s.role
+FROM sessions s
+WHERE s.archived = 0;

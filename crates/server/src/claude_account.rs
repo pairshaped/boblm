@@ -188,12 +188,46 @@ pub fn choose_plan(
         .ok_or_else(|| "No Claude plan accounts are enabled. Add an account to CLAUDE_PLAN_ACCOUNTS in crates/tuning and rebuild BobLM.".into())
 }
 
+/// Explicit model spawns retain their allowance fallback after excluding full accounts.
+pub fn choose_plan_for_spawn(
+    store: &boblm_store::Store,
+    enabled: &[&'static str],
+    now: i64,
+) -> Result<&'static str, String> {
+    let counts = store
+        .reader()
+        .map_err(|error| error.to_string())?
+        .open_provider_counts()
+        .map_err(|error| error.to_string())?;
+    let accounts = plan_accounts(store, enabled)?;
+    let mut reasons = Vec::new();
+    let candidates: Vec<_> = accounts
+        .into_iter()
+        .filter(|account| {
+            let reason = provider_group("claude", MODEL_SONNET, Some(account.key))
+                .and_then(|group| counts.spawn_rejection(group, false));
+            if let Some(reason) = reason {
+                reasons.push(reason);
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    claude_accounts::choose_for_owner(&candidates, now).map(|account| account.key).ok_or_else(|| {
+        if reasons.is_empty() { "No Claude plan account has available allowance and an open slot. Wait for an allowance reset or archive a finished chat before spawning another.".into() } else { reasons.join(" ") }
+    })
+}
+
 pub fn choose_api_from(
     store: &boblm_store::Store,
     enabled: &[&'static str],
     now: i64,
 ) -> Result<Option<&'static str>, String> {
     let reader = store.reader().map_err(|error| error.to_string())?;
+    let counts = reader
+        .open_provider_counts()
+        .map_err(|error| error.to_string())?;
     let marks = reader
         .claude_account_exhaustions()
         .map_err(|error| error.to_string())?;
@@ -203,6 +237,12 @@ pub fn choose_api_from(
         .iter()
         .any(|mark| mark.step == StepId::ReviewerClaudeApi && mark.until > now);
     for &key in enabled {
+        if provider_group("claude", MODEL_HAIKU, Some(key))
+            .is_some_and(|group| counts.spawn_rejection(group, true).is_some())
+        {
+            continue;
+        }
+
         if key == CLAUDE_ACCOUNT_KEY_API_A && legacy {
             continue;
         }
@@ -582,5 +622,160 @@ mod routing_tests {
         .unwrap();
         command.arg("-c").arg("import os,sys; assert os.environ['CLAUDE_CONFIG_DIR']==sys.argv[1]; assert os.environ['BOBLM_SESSION_ID']=='session-1'; assert 'ANTHROPIC_API_KEY' not in os.environ; assert 'ANTHROPIC_AUTH_TOKEN' not in os.environ").arg(dir.path().join("claude-plan-b"));
         assert!(command.status().await.unwrap().success());
+    }
+    fn fill_account(
+        store: &Store,
+        account: &str,
+        model: &str,
+        count: usize,
+        prefix: &str,
+    ) -> Vec<String> {
+        let project = store.reader().unwrap().sessions().unwrap()[0]
+            .project_id
+            .clone()
+            .unwrap();
+        (0..count)
+            .map(|index| {
+                let id = format!("{prefix}-{index}");
+                store
+                    .create_session_in(boblm_store::NewSession {
+                        id: &id,
+                        project_id: &project,
+                        name: "Owner",
+                        agent: "claude",
+                        model,
+                        effort: None,
+                        created_at: 1,
+                    })
+                    .unwrap();
+                store.set_claude_account_key(&id, account).unwrap();
+                id
+            })
+            .collect()
+    }
+
+    #[test]
+    fn provider_caps_claude_plan_filters_full_accounts_before_reset_first_selection() {
+        let (_dir, store, _) = setup();
+        let enabled = &[CLAUDE_ACCOUNT_KEY_PLAN_A, CLAUDE_ACCOUNT_KEY_PLAN_B];
+        usage(&store, "a", 2.0, 300, 1000);
+        usage(&store, "b", 4.0, 200, 1000);
+        assert_eq!(
+            choose_plan_for_spawn(&store, enabled, 100).unwrap(),
+            CLAUDE_ACCOUNT_KEY_PLAN_B
+        );
+        let route = crate::role_spawn::resolve_route(
+            &store,
+            Role::Planner,
+            Difficulty::Simple,
+            EnabledAccounts {
+                plan: &[CLAUDE_ACCOUNT_KEY_PLAN_A, CLAUDE_ACCOUNT_KEY_PLAN_B],
+                api: &[],
+            },
+        )
+        .unwrap();
+        assert_eq!(route.account_key, Some(CLAUDE_ACCOUNT_KEY_PLAN_B));
+        let a = fill_account(
+            &store,
+            CLAUDE_ACCOUNT_KEY_PLAN_A,
+            MODEL_SONNET,
+            MAX_OPEN_CLAUDE_PLAN_AGENTS - 1,
+            "full-a",
+        );
+        assert_eq!(
+            choose_plan_for_spawn(&store, enabled, 100).unwrap(),
+            CLAUDE_ACCOUNT_KEY_PLAN_B
+        );
+        store.set_archived(&a[0], true).unwrap();
+        let b = fill_account(
+            &store,
+            CLAUDE_ACCOUNT_KEY_PLAN_B,
+            MODEL_OPUS,
+            MAX_OPEN_CLAUDE_PLAN_AGENTS - 1,
+            "full-b",
+        );
+        assert_eq!(
+            choose_plan_for_spawn(&store, enabled, 100).unwrap(),
+            CLAUDE_ACCOUNT_KEY_PLAN_A
+        );
+        store.set_archived(&a[0], false).unwrap();
+        let route_error = crate::role_spawn::resolve_route(
+            &store,
+            Role::Planner,
+            Difficulty::Simple,
+            EnabledAccounts {
+                plan: &[CLAUDE_ACCOUNT_KEY_PLAN_A, CLAUDE_ACCOUNT_KEY_PLAN_B],
+                api: &[],
+            },
+        )
+        .unwrap_err();
+        assert!(
+            route_error.contains("Claude plan account A"),
+            "{route_error}"
+        );
+        assert!(
+            route_error.contains("Claude plan account B"),
+            "{route_error}"
+        );
+        let error = choose_plan_for_spawn(&store, enabled, 100).unwrap_err();
+        assert!(error.contains("Claude plan account A"), "{error}");
+        assert!(error.contains("Claude plan account B"), "{error}");
+        // Owner selection is allowed even when both accounts exceed the spawn caps.
+        assert_eq!(
+            choose_plan(&store, enabled, 100).unwrap(),
+            CLAUDE_ACCOUNT_KEY_PLAN_B
+        );
+        store.set_archived(&b[0], true).unwrap();
+        assert_eq!(
+            choose_plan_for_spawn(&store, enabled, 100).unwrap(),
+            CLAUDE_ACCOUNT_KEY_PLAN_B
+        );
+        // The allowance cutoff still excludes B despite its earlier reset.
+        usage(&store, "b", 100.0, 200, 2000);
+        store.set_archived(&a[0], true).unwrap();
+        assert_eq!(
+            choose_plan_for_spawn(&store, enabled, 100).unwrap(),
+            CLAUDE_ACCOUNT_KEY_PLAN_A
+        );
+    }
+
+    #[test]
+    fn provider_caps_haiku_uses_configuration_order_skipping_full_accounts() {
+        let (_dir, store, _) = setup();
+        let enabled = &[CLAUDE_ACCOUNT_KEY_API_A, CLAUDE_ACCOUNT_KEY_API_B];
+        let a = fill_account(
+            &store,
+            CLAUDE_ACCOUNT_KEY_API_A,
+            MODEL_HAIKU,
+            MAX_OPEN_HAIKU_API_AGENTS,
+            "api-a",
+        );
+        assert_eq!(
+            choose_api_from(&store, enabled, 100).unwrap(),
+            Some(CLAUDE_ACCOUNT_KEY_API_B)
+        );
+        let b = fill_account(
+            &store,
+            CLAUDE_ACCOUNT_KEY_API_B,
+            MODEL_HAIKU,
+            MAX_OPEN_HAIKU_API_AGENTS,
+            "api-b",
+        );
+        assert_eq!(choose_api_from(&store, enabled, 100).unwrap(), None);
+        store.set_archived(&a[0], true).unwrap();
+        store.set_archived(&b[0], true).unwrap();
+        assert_eq!(
+            choose_api_from(&store, enabled, 100).unwrap(),
+            Some(CLAUDE_ACCOUNT_KEY_API_A)
+        );
+        assert_eq!(
+            choose_api_from(
+                &store,
+                &[CLAUDE_ACCOUNT_KEY_API_B, CLAUDE_ACCOUNT_KEY_API_A],
+                100
+            )
+            .unwrap(),
+            Some(CLAUDE_ACCOUNT_KEY_API_B)
+        );
     }
 }

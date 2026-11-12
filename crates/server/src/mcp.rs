@@ -797,7 +797,7 @@ impl Peers {
         )
     }
     #[tool(
-        description = "Create a chat with a required title and accept its first work message immediately. Give either model and effort explicitly, or role (implementer, reviewer or planner) with difficulty only for an implementer. planner: only when the owner explicitly asks for a planner. For mechanical work, use an implementer or spawn_peer with an explicit model. Use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). A role spawn is resolved once and stored on the receipt, so an identical retry never re-resolves. Role spawn_peer creates a visible root chat; use spawn_subagent for a hidden subagent. Supply a fresh requestId UUID; an identical explicit retry returns the same child and never replays held or uncertain input. The title is part of the retry identity, so a different title with the same requestId conflicts. accepted means persisted, not consumed. Inspect the returned session if dispatchFailed is true."
+        description = "Create a chat with a required title and accept its first work message immediately. Provider account caps count all open chats, including owner chats, and only stop agents from starting more. A role request falls through full providers; an explicit model request is refused when its provider is full. Archive finished chats to free slots. Give either model and effort explicitly, or role (implementer or planner) with difficulty only for an implementer. A reviewer is never a root chat: spawn_peer refuses role reviewer, so start reviewers with spawn_subagent. planner: only when the owner explicitly asks for a planner. For mechanical work, use an implementer or spawn_peer with an explicit model. Use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). A role spawn is resolved once and stored on the receipt, so an identical retry never re-resolves. Role spawn_peer creates a visible root chat; use spawn_subagent for a hidden subagent. Supply a fresh requestId UUID; an identical explicit retry returns the same child and never replays held or uncertain input. The title is part of the retry identity, so a different title with the same requestId conflicts. accepted means persisted, not consumed. Inspect the returned session if dispatchFailed is true."
     )]
     async fn spawn_peer(
         &self,
@@ -818,6 +818,15 @@ impl Peers {
                 }
                 boblm_protocol::client::check_chat_name(&args.title, false)?;
                 let (role, difficulty) = crate::role_spawn::parse_role(role, args.difficulty.as_deref())?;
+                if role == boblm_tuning::Role::Reviewer {
+                    // A subagent cannot start another, so spawn_subagent would be wrong advice for it.
+                    let caller_is_subagent = crate::role_spawn::is_subagent(&self.resolve(&caller).await?);
+                    return Err(if caller_is_subagent {
+                        "spawn_peer cannot start a reviewer, because a reviewer must be a hidden subagent and never a root chat. You are a subagent, and a subagent cannot start another. Use message_parent to ask your parent to start the reviewer."
+                    } else {
+                        "spawn_peer cannot start a reviewer, because a reviewer must be a hidden subagent and never a root chat. Call spawn_subagent with role reviewer instead."
+                    }.into());
+                }
                 let arguments = serde_json::to_string(&RoleSpawnArguments {
                     request_id: &args.request_id,
                     title: &args.title,
@@ -886,7 +895,7 @@ impl Peers {
                     if reader.peer_spawn_receipt(&id).map_err(|error| error.to_string())?.is_some() {
                         return Ok(reader.sessions().map_err(|error| error.to_string())?.into_iter().find(|session| session.id == id).and_then(|session| session.account_key));
                     }
-                    crate::claude_account::choose_plan(&store, enabled.plan, created_at / 1000).map(|key| Some(key.into()))
+                    crate::claude_account::choose_plan_for_spawn(&store, enabled.plan, created_at / 1000).map(|key| Some(key.into()))
                 }).await.map_err(|error| format!("Could not choose a Claude account: {error}. Try again after storage is available."))??
             } else { None };
             let (session,created)=self.app.spawn_peer(boblm_store::PeerSpawn{request_id:args.request_id.clone(),caller,arguments,project_id:project.id.clone(),agent:agent.as_str().into(),model:model.to_owned(),effort:effort.to_owned(),title:args.title,content,created_at,parent_session_id:None,root_session_id:None,role:None,resolved:None,working_directory:None,account_key}).await?;
@@ -895,7 +904,7 @@ impl Peers {
         }.await)
     }
     #[tool(
-        description = "Create a hidden role subagent under THIS chat with a required title, and accept its first work message. role is implementer, reviewer or planner; planner: only when the owner explicitly asks for a planner. Only implementers need difficulty simple or hard. For mechanical work, use an implementer or spawn_peer with an explicit model. Use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). The model, effort and account come from BobLM's role resolver and are named in the result. No subagent may spawn another subagent, and a root may have at most 3 open subagents. The result lists the parent's open subagents with idle times. After a runaway pause, inspect progress and decide whether to ping for a fresh round or archive; if unsure, ask the owner with ask before continuing. Supply a fresh requestId UUID; an identical retry returns the stored routing and never re-resolves. The title is part of the retry identity, so a different title with the same requestId conflicts."
+        description = "Create a hidden role subagent under THIS chat with a required title, and accept its first work message. role is implementer, reviewer or planner; planner: only when the owner explicitly asks for a planner. Only implementers need difficulty simple or hard. For mechanical work, use an implementer or spawn_peer with an explicit model. Use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). The model, effort and account come from BobLM's role resolver and are named in the result. No subagent may spawn another subagent. Provider account caps count all open chats, including owner chats. They only stop agents from starting more peers or subagents. Reviewers may have at most three open chats per provider account; archive finished reviewers. Archive finished chats to free slots. The result lists the parent's open subagents with idle times. After a runaway pause, inspect progress and decide whether to ping for a fresh round or archive; if unsure, ask the owner with ask before continuing. Supply a fresh requestId UUID; an identical retry returns the stored routing and never re-resolves. The title is part of the retry identity, so a different title with the same requestId conflicts."
     )]
     async fn spawn_subagent(
         &self,

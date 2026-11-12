@@ -38,10 +38,18 @@ Expired samples do not become invented zero-usage observations.
 
 The Sonnet implementer step has no reserve. It uses only the 2% cutoff, with one
 plan account or several.
-Haiku API reviewers choose the first enabled API account with credit that has
-no active exhaustion mark, A then B. Unknown credit balances are allowed.
+Each plan and API account has its own open-chat and reviewer caps (ADR 0043).
+Role spawns filter full plan accounts before applying the existing reset-first
+selection and allowance cutoff. Explicit model spawns filter full accounts and
+retain their allowance fallback when every plan is exhausted. Owner account
+selection remains unrestricted.
+Haiku API reviewers choose the first enabled API account with room and credit
+that has no active exhaustion mark, in configuration order. They fall through to
+DeepSeek when no enabled API account is available. Unknown credit balances are allowed.
 Quota or billing failures mark the individual API account until the configured
-monthly credit reset. An older global Haiku exhaustion mark applies to A only.
+monthly credit grant day, the 27th UTC (`ANTHROPIC_API_CREDIT_RESET_DAY`). This is
+account A's credit grant day, independent of billing. B shares it until the owner
+links B and confirms its grant day. An older global Haiku exhaustion mark applies to A only.
 
 ## Handoff
 

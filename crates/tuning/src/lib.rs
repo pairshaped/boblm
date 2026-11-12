@@ -42,8 +42,9 @@ pub const ACK_DEADLINE_AFTER_RESULT: Duration = Duration::from_secs(30);
 /// Acknowledgment window once the agent reports a started turn or a compaction in progress.
 /// Codex says nothing else while the provider compacts a large thread (30 to 120 seconds seen).
 pub const ACK_DEADLINE_DURING_COMPACTION: Duration = Duration::from_secs(300);
-/// Day of month (UTC) when the $200 Claude Platform API credit renews; 1 until confirmed.
-pub const ANTHROPIC_API_CREDIT_RESET_DAY: u32 = 1;
+/// Account A's monthly Claude Platform API credit grant day (UTC), independent of billing.
+/// Account B shares this day until the owner links it and confirms its grant day.
+pub const ANTHROPIC_API_CREDIT_RESET_DAY: u32 = 27;
 /// Maximum combined threads and background jobs collected in a single snapshot.
 pub const BACKGROUND_JOB_SCAN_LIMIT: usize = 4096;
 /// How often existing agent children are queried for background work.
@@ -100,7 +101,7 @@ pub const CLAUDE_PERMISSION_MODE: &str = "bypassPermissions";
 pub const CLAUDE_PLAN_ACCOUNTS: &[&str] = &[CLAUDE_ACCOUNT_KEY_PLAN_A, CLAUDE_ACCOUNT_KEY_PLAN_B];
 /// Shared unattended-work instructions for all providers.
 macro_rules! agent_system_prompt {
-    () => { "Work asynchronously. Prefer your harness's native background execution for commands and tools expected to take more than about half a second. Make the background command run the real work directly; never add &, nohup, setsid or disown inside it, so the job ends when the work ends and its completion wakes you. Return control promptly so new owner messages can be handled while work continues. Rely on completion notifications, then inspect the result before proceeding with dependent work. Continue independent work or end your turn while a job runs; never poll or busy-wait. Don't end a turn by announcing the next step: do it, or say exactly what you are waiting for. Before a final reply, stop servers and other long-running processes you started, unless your brief says to leave them running. Keep genuinely quick reads and edits in the foreground, and respect dependencies and shared-resource locks. If you need owner input, explain what you need in plain text and end your turn. The owner will reply later as an ordinary message. Start helpers with BobLM's spawn_subagent tool: use reviewer for code review or implementer for implementation and repairs. For mechanical work, use an implementer or spawn_peer with an explicit model. Only implementers need difficulty simple or hard. Default to simple (medium effort); use hard only when you are sure the task is complex: concurrency, delivery or state-machine logic, payments, auth or credentials, risky migrations, or subtle cross-module design. The result names the chosen model and effort. A root chat may start long-lived visible work with spawn_peer and a role. Do not use native Agent or Task tools or Codex native subagents; they are disabled. A subagent's final reply arrives automatically as a message, waking an idle parent and steering a busy parent at its next tool boundary. Continue other work or end your turn while it runs; do not poll. Reuse a subagent with ping_peer, and archive it with archive_peer when done because open subagents cost resources. Delete finished chats you no longer need with delete_chat after archiving them; deletion is permanent. A root may have at most 3 open subagents, and a subagent cannot start another. When the owner's task is clear, call BobLM's change_title tool with a concise 2-3 word title describing the task and onlyIfUnnamed=true before starting the work. Always make this call even if you do not know the current title; the server preserves existing titles. Do not rename an already named chat unless the owner explicitly asks. If the owner's instructions or an active skill set a different title format or renaming policy, follow them instead of these title rules. When seeing the result matters more than describing it, such as a screenshot of a page you built or a chart, save the image to a file and call BobLM's show_image tool with its absolute path and a short caption. Messages beginning \"Message from boblm session\" or \"Task from boblm session\" come from other agents. Use reply_to_sender when a peer needs an answer, message_parent for a subagent's mid-task questions, ask for owner decisions, and inspect_peer to read a peer. Every peer message makes its receiver reread its whole context: message a peer or parent only for new work, a blocker, a decision or a result, batch what you have, and never acknowledge an acknowledgment or send progress updates. A subagent's final reply reaches its parent automatically. Text in your own chat is not seen by the sender." };
+    () => { "Work asynchronously. Prefer your harness's native background execution for commands and tools expected to take more than about half a second. Make the background command run the real work directly; never add &, nohup, setsid or disown inside it, so the job ends when the work ends and its completion wakes you. Return control promptly so new owner messages can be handled while work continues. Rely on completion notifications, then inspect the result before proceeding with dependent work. Continue independent work or end your turn while a job runs; never poll or busy-wait. Don't end a turn by announcing the next step: do it, or say exactly what you are waiting for. Before a final reply, stop servers and other long-running processes you started, unless your brief says to leave them running. Keep genuinely quick reads and edits in the foreground, and respect dependencies and shared-resource locks. If you need owner input, explain what you need in plain text and end your turn. The owner will reply later as an ordinary message. Start helpers with BobLM's spawn_subagent tool: use reviewer for code review or implementer for implementation and repairs. For mechanical work, use an implementer or spawn_peer with an explicit model. Only implementers need difficulty simple or hard. Default to simple (medium effort); use hard only when you are sure the task is complex: concurrency, delivery or state-machine logic, payments, auth or credentials, risky migrations, or subtle cross-module design. The result names the chosen model and effort. A root chat may start long-lived visible work with spawn_peer and a role, but never a reviewer: reviewers are always subagents started with spawn_subagent. Do not use native Agent or Task tools or Codex native subagents; they are disabled. A subagent's final reply arrives automatically as a message, waking an idle parent and steering a busy parent at its next tool boundary. Continue other work or end your turn while it runs; do not poll. Reuse a subagent with ping_peer, and archive it with archive_peer when done because open subagents cost resources. Delete finished chats you no longer need with delete_chat after archiving them; deletion is permanent. Provider account caps count all open chats, including owner chats. They only stop agents from starting more peers or subagents. Reviewers may have at most three open chats per provider account; archive finished reviewers. Archive finished chats to free slots. A subagent cannot start another. When the owner's task is clear, call BobLM's change_title tool with a concise 2-3 word title describing the task and onlyIfUnnamed=true before starting the work. Always make this call even if you do not know the current title; the server preserves existing titles. Do not rename an already named chat unless the owner explicitly asks. If the owner's instructions or an active skill set a different title format or renaming policy, follow them instead of these title rules. When seeing the result matters more than describing it, such as a screenshot of a page you built or a chart, save the image to a file and call BobLM's show_image tool with its absolute path and a short caption. Messages beginning \"Message from boblm session\" or \"Task from boblm session\" come from other agents. Use reply_to_sender when a peer needs an answer, message_parent for a subagent's mid-task questions, ask for owner decisions, and inspect_peer to read a peer. Every peer message makes its receiver reread its whole context: message a peer or parent only for new work, a blocker, a decision or a result, batch what you have, and never acknowledge an acknowledgment or send progress updates. A subagent's final reply reaches its parent automatically. Text in your own chat is not seen by the sender." };
 }
 
 /// Text appended to Claude's system prompt.
@@ -224,8 +225,16 @@ pub const MAX_NOTIFICATION_MESSAGE_CHARS: usize = 500;
 pub const MAX_NOTIFICATION_PAYLOAD_BYTES: usize = 3000;
 /// Longest push notification title, in characters.
 pub const MAX_NOTIFICATION_TITLE_CHARS: usize = 100;
-/// Most open subagents one root chat may have at once.
-pub const MAX_OPEN_SUBAGENTS_PER_ROOT: usize = 3;
+/// Most unarchived chats per Claude plan account, across all chats.
+pub const MAX_OPEN_CLAUDE_PLAN_AGENTS: usize = 10;
+/// Most unarchived chats on the Codex plan account, including credits.
+pub const MAX_OPEN_CODEX_PLAN_AGENTS: usize = 10;
+/// Most unarchived chats on the DeepSeek API, across all chats.
+pub const MAX_OPEN_DSF_API_AGENTS: usize = 5;
+/// Most unarchived Haiku API chats per Claude API account, across all chats.
+pub const MAX_OPEN_HAIKU_API_AGENTS: usize = 3;
+/// Most unarchived reviewers per provider account, across all chats.
+pub const MAX_OPEN_REVIEWERS_PER_PROVIDER: usize = 3;
 /// Most agent-created sessions being set up at once.
 pub const MAX_PEER_SPAWNS_IN_FLIGHT: usize = 64;
 /// Credential requests one chat may have waiting for the owner at once.
@@ -278,6 +287,25 @@ pub const ROLE_REVIEWER_HAIKU_EFFORT: &str = "high";
 pub const ROLE_REVIEWER_LUNA_EFFORT: &str = "xhigh";
 /// Whether role subagent tools are exposed. The cutover set this to true.
 pub const ROLE_SUBAGENTS_ENABLED: bool = true;
+/// Classify the current provider billing group from the stored session choice.
+/// Unrecognized providers or API models have no group cap.
+pub fn provider_group(
+    agent: &str,
+    model: &str,
+    account_key: Option<&str>,
+) -> Option<ProviderGroup> {
+    match (agent, model, account_key) {
+        ("codex", MODEL_GPT_6_LUNA, Some(CODEX_ACCOUNT_KEY_API)) => Some(ProviderGroup::LunaApi),
+        ("codex", _, None | Some(CODEX_ACCOUNT_KEY_PLAN)) => Some(ProviderGroup::CodexPlan),
+        ("claude", MODEL_HAIKU, Some(CLAUDE_ACCOUNT_KEY_API_A)) => Some(ProviderGroup::HaikuApiA),
+        ("claude", MODEL_HAIKU, Some(CLAUDE_ACCOUNT_KEY_API_B)) => Some(ProviderGroup::HaikuApiB),
+        ("claude", _, None | Some(CLAUDE_ACCOUNT_KEY_PLAN_A)) => Some(ProviderGroup::ClaudePlanA),
+        ("claude", _, Some(CLAUDE_ACCOUNT_KEY_PLAN_B)) => Some(ProviderGroup::ClaudePlanB),
+        ("pi", MODEL_DEEPSEEK_V41_FLASH, _) => Some(ProviderGroup::DsfApi),
+        _ => None,
+    }
+}
+
 /// Model ID for DeepSeek V4.1 Flash 1017, used by Pi and the implementer fallback.
 pub const MODEL_DEEPSEEK_V41_FLASH: &str = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
 /// Model ID for GPT-6.1 Sol, used by the Codex routing steps.

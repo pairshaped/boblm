@@ -127,8 +127,40 @@ pub fn resolve_route(
         });
     }
     let now_ms = unix_millis();
+    let mut counts = reader.open_provider_counts().map_err(|error| {
+        format!("Could not count provider chats: {error}. Try again after storage is available.")
+    })?;
+    counts.enabled_plan = [
+        enabled
+            .plan
+            .contains(&boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A),
+        enabled
+            .plan
+            .contains(&boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B),
+    ];
+    counts.enabled_api = [
+        enabled
+            .api
+            .contains(&boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A),
+        enabled
+            .api
+            .contains(&boblm_tuning::CLAUDE_ACCOUNT_KEY_API_B),
+    ];
     let accounts = crate::claude_account::plan_accounts(store, enabled.plan)?;
-    let plan = boblm_tuning::claude_accounts::choose(&accounts, now_ms / 1000);
+    let candidates: Vec<_> = accounts
+        .iter()
+        .filter(|account| {
+            boblm_tuning::provider_group("claude", boblm_tuning::MODEL_SONNET, Some(account.key))
+                .is_none_or(|group| {
+                    counts
+                        .spawn_rejection(group, role == Role::Reviewer)
+                        .is_none()
+                })
+        })
+        .cloned()
+        .collect();
+    let plan = boblm_tuning::claude_accounts::choose(&candidates, now_ms / 1000);
+    counts.unavailable_plan = [plan.is_none(); 2];
     readings.push(AccountReading {
         account: AccountKind::ClaudePlan,
         weekly_used_percent: plan
@@ -138,28 +170,24 @@ pub fn resolve_route(
         credits_balance: None,
     });
     let api = crate::claude_account::choose_api_from(store, enabled.api, now_ms / 1000)?;
+    counts.unavailable_api = [api.is_none(); 2];
     let mut exhausted = exhausted;
     // New quota failures mark individual Claude API accounts. Retain a legacy global
     // mark for A until its original expiry, without blocking a newly enabled B.
-    if let Some(key) = api {
-        if key != boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A {
-            exhausted.retain(|mark| mark.step != StepId::ReviewerClaudeApi);
-        }
-    } else {
-        exhausted.push(boblm_tuning::ExhaustedStep {
-            step: StepId::ReviewerClaudeApi,
-            until: i64::MAX,
-        });
+    if api.is_some_and(|key| key != boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A) {
+        exhausted.retain(|mark| mark.step != StepId::ReviewerClaudeApi);
     }
+
     let headroom = reader.api_reviewer_headroom(now_ms)
         .map_err(|error| format!("Could not measure API reviewer headroom: {error}. Try spawning again after storage is available."))?;
-    match boblm_tuning::resolve(
+    match boblm_tuning::resolve_with_groups(
         role,
         difficulty,
         &readings,
         &exhausted,
         headroom,
         now_ms / 1000,
+        counts,
     ) {
         RouteOutcome::Chosen(mut route) => {
             route.account_key = match route.account {

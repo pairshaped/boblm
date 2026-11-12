@@ -332,20 +332,6 @@ pub fn subagents(conn: &Connection, params: SubagentsParams<'_>) -> Result<Vec<S
 }
 
 #[derive(Debug)]
-pub struct OpenSubagentsParams<'a> {
-    pub root_session_id: &'a str,
-}
-
-const OPEN_SUBAGENTS_SQL: &str =
-    r"SELECT COUNT(*) AS count FROM sessions WHERE root_session_id = ?1 AND archived = 0";
-
-pub fn open_subagents(conn: &Connection, params: OpenSubagentsParams<'_>) -> Result<Vec<i64>> {
-    let mut stmt = conn.prepare_cached(OPEN_SUBAGENTS_SQL)?;
-    let rows = stmt.query_map(params![params.root_session_id], |row| row.get(0))?;
-    rows.collect()
-}
-
-#[derive(Debug)]
 pub struct SubagentSummaryParams<'a> {
     pub root_session_id: &'a str,
 }

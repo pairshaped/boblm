@@ -7,8 +7,7 @@ and the account readings from ADR 0037. The result names the chosen model,
 effort, account, step and reason.
 
 A visible root chat can
-spawn subagents; a subagent cannot spawn another subagent. At most three open
-subagents are allowed per root. Native Claude Agent/Task and Codex multi-agent
+spawn subagents; a subagent cannot spawn another subagent. All open chats share provider caps across all roots. Native Claude Agent/Task and Codex multi-agent
 use are turned off for new provider launches.
 
 ## Roles and efforts
@@ -75,12 +74,13 @@ per-round runaway backstop below catches subagents that keep going unchecked.
 The runner detects provider quota or billing rejections in provider error
 envelopes. Pi and Codex mark their routed step after checking that the chat's
 account matches. Claude marks the individual account, including for explicitly
-created chats. The Haiku step tries enabled API accounts in A, B order. An
+created chats. The Haiku step tries enabled API accounts in configuration order. An
 OpenAI API quota or billing mark lasts until the start of the next OPENAI_API_CREDIT_RESET_DAY (the 1st, the ChatGPT plan renewal date) UTC, or the month's
 last day when it is shorter. The Claude API account has $200 of monthly credit;
 quota or billing rejection marks that API account exhausted until the next
-`ANTHROPIC_API_CREDIT_RESET_DAY` UTC. That tunable defaults to 1 until the actual
-renewal date is known. It uses exhaustion marks, without the Claude plan cutoff. A step with no known reset, currently DeepSeek, is
+`ANTHROPIC_API_CREDIT_RESET_DAY` UTC, the 27th. This is account A's monthly credit
+grant day, independent of billing. Account B shares it until the owner links B
+and confirms its grant day. It uses exhaustion marks, without the Claude plan cutoff. A step with no known reset, currently DeepSeek, is
 retried after `ROLE_EXHAUSTION_RETRY` (one hour). The resolver reads the marks in
 the same request that chooses a route, so a marked step is skipped immediately.
 
@@ -102,7 +102,9 @@ number must be strictly below `OPENAI_API_TPM_LIMIT` (2,000,000) times
 `OPENAI_API_TPM_BUDGET` (0.5), a 1,000,000-token spawn budget. The unused half
 leaves room for already running reviews to finish as their contexts grow.
 
-The number of unarchived API reviewers must also be strictly below
+All Luna API chats also share the global open-chat cap.
+The activity-window guard also requires the number of unarchived API reviewers
+to be strictly below
 `OPENAI_API_MAX_ACTIVE_REVIEWERS` (3). A reviewer counts while mid-turn or when
 its latest agent event or input is within the same 60-second window. A newly
 spawned reviewer counts immediately, before it has a usage sample. Route
@@ -132,7 +134,8 @@ creates a hidden subagent under the calling root. Its first message carries the
 subagent reply trailer, so the child knows its final reply reaches the parent
 automatically and `message_parent` is for mid-task questions only. `spawn_peer` accepts either
 explicit `model` and `effort` or `role` and `difficulty`; the role form creates a
-visible root chat. Both require a title of 1 to 200 characters, stored on the
+visible root chat. A reviewer is always a hidden subagent: `spawn_peer` refuses role
+`reviewer` with a sentence pointing to `spawn_subagent`. Both require a title of 1 to 200 characters, stored on the
 child in the spawn transaction and included in the receipt identity. Plain
 `spawn_peer` keeps its previous independent-root behavior.
 
@@ -141,9 +144,38 @@ receipt. An identical retry returns that stored choice and never re-resolves, ev
 if readings changed. A conflicting reuse still fails. The result names the route
 and lists the caller's open subagents with idle time from their last stored event.
 
-A subagent cannot spawn another subagent. A root may have at most
-`MAX_OPEN_SUBAGENTS_PER_ROOT` (3) open subagents; the store checks the limit inside
-the spawn transaction. A subagent working folder must be inside the caller's
+A subagent cannot spawn another subagent. Provider caps count every unarchived
+chat, including owner chats, visible peers and hidden subagents. Only agent spawns are refused or routed around a full group.
+Owner creation, reopening, model changes and messages remain unrestricted.
+There are no per-root or global total caps. `MAX_OPEN_REVIEWERS_PER_PROVIDER`
+(3) also limits open reviewers in each provider account. Implementers and owner
+chats without a reviewer role do not consume reviewer slots. Reviewer routing
+skips a group when either cap is full; both are checked in the insert transaction.
+For Luna API, the reviewer sub-cap and activity-window guard both allow three
+reviewers, matching the total group cap.
+
+The caps are `OPENAI_API_MAX_ACTIVE_REVIEWERS` (3) for Luna API,
+`MAX_OPEN_HAIKU_API_AGENTS` (3) per Claude API account,
+`MAX_OPEN_CODEX_PLAN_AGENTS` (10), `MAX_OPEN_CLAUDE_PLAN_AGENTS` (10) per Claude
+plan account, and `MAX_OPEN_DSF_API_AGENTS` (5).
+Codex plan includes Sol implementers on allowance or credits and Luna plan reviewers.
+Claude plan includes Sonnet implementers and Opus planners, with independent caps
+for accounts A and B. Haiku API also has independent caps for accounts A and B.
+DSF API includes both Pi role steps. Full Claude accounts are removed before
+selection. Plan accounts retain reset-first ordering and the allowance cutoff;
+API accounts retain configuration order and individual credit exhaustion checks.
+A Claude step falls through only when every enabled account is unavailable, with
+a reason naming each full account.
+Current stored agent, model and account key determine the group, including plain
+model-selected peers. Model or account changes move chats between groups
+immediately. Other providers have no group cap.
+
+Routing skips a full group and tries the next step, reporting the group's count,
+cap and instruction to archive a finished chat. Plain model-selected peers cannot
+fall through and are refused when their group is full. Role selection and receipt
+creation share the role-routing lock, with another check in the insertion transaction for
+both spawn tools. Accepted retries return their receipt before checking caps.
+Archiving frees a slot. A subagent working folder must be inside the caller's
 project after canonicalization and must exist as a directory. Both forms of
 `spawn_peer` also require an existing project directory before persisting a new chat.
 An identical accepted role spawn retry keeps its receipt even if its folder has since
@@ -158,7 +190,7 @@ tools disallowed. Codex launches with the `multi_agent` and `multi_agent_v2`
 features off in the thread config and on the command line, and `ultra` is no
 longer offered as a Codex effort. The appended system prompt tells agents to
 start helpers with `spawn_subagent`, use role-routed `spawn_peer` for long-lived
-visible work, expect results as messages, reuse a subagent with `ping_peer`, and
+visible implementer work (never a reviewer), expect results as messages, reuse a subagent with `ping_peer`, and
 archive it with `archive_peer` when done. The native subagent history and wake
 code stays for chats started before the cutover.
 

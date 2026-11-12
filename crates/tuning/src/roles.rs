@@ -278,6 +278,162 @@ pub struct AccountReading {
     pub credits_balance: Option<f64>,
 }
 
+/// A provider billing account with its own open-chat and reviewer caps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderGroup {
+    CodexPlan,
+    ClaudePlanA,
+    ClaudePlanB,
+    LunaApi,
+    HaikuApiA,
+    HaikuApiB,
+    DsfApi,
+}
+
+impl ProviderGroup {
+    pub const ALL: [Self; 7] = [
+        Self::CodexPlan,
+        Self::ClaudePlanA,
+        Self::ClaudePlanB,
+        Self::LunaApi,
+        Self::HaikuApiA,
+        Self::HaikuApiB,
+        Self::DsfApi,
+    ];
+
+    pub fn account(self) -> AccountKind {
+        match self {
+            Self::CodexPlan => AccountKind::CodexPlan,
+            Self::ClaudePlanA | Self::ClaudePlanB => AccountKind::ClaudePlan,
+            Self::LunaApi => AccountKind::OpenAiApi,
+            Self::HaikuApiA | Self::HaikuApiB => AccountKind::ClaudeApi,
+            Self::DsfApi => AccountKind::DeepSeek,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::CodexPlan => "The Codex plan group",
+            Self::ClaudePlanA => "Claude plan account A",
+            Self::ClaudePlanB => "Claude plan account B",
+            Self::LunaApi => "The Luna API group",
+            Self::HaikuApiA => "Haiku API account A",
+            Self::HaikuApiB => "Haiku API account B",
+            Self::DsfApi => "The DSF API group",
+        }
+    }
+
+    pub fn cap(self) -> usize {
+        match self {
+            Self::CodexPlan => MAX_OPEN_CODEX_PLAN_AGENTS,
+            Self::ClaudePlanA | Self::ClaudePlanB => MAX_OPEN_CLAUDE_PLAN_AGENTS,
+            Self::LunaApi => OPENAI_API_MAX_ACTIVE_REVIEWERS,
+            Self::HaikuApiA | Self::HaikuApiB => MAX_OPEN_HAIKU_API_AGENTS,
+            Self::DsfApi => MAX_OPEN_DSF_API_AGENTS,
+        }
+    }
+}
+
+/// Open sessions by their current provider account. Enabled lists affect routing only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderCounts {
+    pub open: [usize; ProviderGroup::ALL.len()],
+    pub reviewers: [usize; ProviderGroup::ALL.len()],
+    pub enabled_plan: [bool; 2],
+    pub enabled_api: [bool; 2],
+    pub unavailable_plan: [bool; 2],
+    pub unavailable_api: [bool; 2],
+}
+
+impl Default for ProviderCounts {
+    fn default() -> Self {
+        Self {
+            open: [0; ProviderGroup::ALL.len()],
+            reviewers: [0; ProviderGroup::ALL.len()],
+            enabled_plan: [true, false],
+            enabled_api: [true, false],
+            unavailable_plan: [false; 2],
+            unavailable_api: [false; 2],
+        }
+    }
+}
+
+impl ProviderCounts {
+    pub fn add(&mut self, group: ProviderGroup) {
+        self.open[group as usize] += 1;
+    }
+    pub fn add_reviewer(&mut self, group: ProviderGroup) {
+        self.reviewers[group as usize] += 1;
+    }
+    pub fn count(self, group: ProviderGroup) -> usize {
+        self.open[group as usize]
+    }
+
+    pub fn reviewer_rejection(self, group: ProviderGroup) -> Option<String> {
+        let count = self.reviewers[group as usize];
+        (count >= MAX_OPEN_REVIEWERS_PER_PROVIDER).then(|| format!(
+            "{} already has {count} of {} reviewers open across every chat. Archive a finished reviewer to free a slot.", group.label(), MAX_OPEN_REVIEWERS_PER_PROVIDER
+        ))
+    }
+
+    pub fn rejection(self, group: ProviderGroup) -> Option<String> {
+        let count = self.count(group);
+        let cap = group.cap();
+        (count >= cap).then(|| format!("{} has {count} of {cap} chats open across all chats, counting owner chats. Archive a finished chat to free a slot.", group.label()))
+    }
+
+    pub fn spawn_rejection(self, group: ProviderGroup, reviewer: bool) -> Option<String> {
+        self.rejection(group)
+            .or_else(|| reviewer.then(|| self.reviewer_rejection(group)).flatten())
+    }
+
+    /// A role step is full only when every enabled account for that step is full.
+    fn route_rejection(self, account: AccountKind, reviewer: bool) -> Option<String> {
+        let mut reasons = Vec::new();
+        for group in ProviderGroup::ALL {
+            let enabled = match group {
+                ProviderGroup::ClaudePlanA => self.enabled_plan[0],
+                ProviderGroup::ClaudePlanB => self.enabled_plan[1],
+                ProviderGroup::HaikuApiA => self.enabled_api[0],
+                ProviderGroup::HaikuApiB => self.enabled_api[1],
+                _ => true,
+            };
+            if group.account() != account || !enabled {
+                continue;
+            }
+            if let Some(reason) = self.spawn_rejection(group, reviewer) {
+                reasons.push(reason);
+                continue;
+            }
+            let unavailable = match group {
+                ProviderGroup::ClaudePlanA => self.unavailable_plan[0],
+                ProviderGroup::ClaudePlanB => self.unavailable_plan[1],
+                ProviderGroup::HaikuApiA => self.unavailable_api[0],
+                ProviderGroup::HaikuApiB => self.unavailable_api[1],
+                _ => false,
+            };
+            if unavailable {
+                let resource = if account == AccountKind::ClaudePlan {
+                    "plan allowance"
+                } else {
+                    "API credit"
+                };
+                reasons.push(format!("{} has no available {resource}. Wait for its quota reset or use another account.", group.label()));
+            } else {
+                return None;
+            }
+        }
+        if reasons.is_empty() && matches!(account, AccountKind::ClaudePlan | AccountKind::ClaudeApi)
+        {
+            return Some(format!(
+                "No {} accounts are enabled. Enable an account before starting another chat.",
+                account.label()
+            ));
+        }
+        (!reasons.is_empty()).then(|| reasons.join(" "))
+    }
+}
+
 /// Measured API load, supplied by the caller to keep routing free of I/O.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ApiHeadroom {
@@ -380,7 +536,7 @@ pub fn openai_api_reset_at(now: i64) -> i64 {
     credit_reset_at(now, OPENAI_API_CREDIT_RESET_DAY)
 }
 
-/// Next Claude Platform API credit renewal, in UTC.
+/// Next Claude Platform API credit grant, in UTC.
 pub fn claude_api_reset_at(now: i64) -> i64 {
     credit_reset_at(now, ANTHROPIC_API_CREDIT_RESET_DAY)
 }
@@ -479,7 +635,54 @@ pub fn resolve(
     headroom: ApiHeadroom,
     now: i64,
 ) -> RouteOutcome {
-    resolve_with(
+    resolve_with_groups(
+        role,
+        difficulty,
+        readings,
+        exhausted,
+        headroom,
+        now,
+        ProviderCounts::default(),
+    )
+}
+
+#[cfg(test)]
+fn resolve_with(
+    role: Role,
+    difficulty: Difficulty,
+    readings: &[AccountReading],
+    exhausted: &[ExhaustedStep],
+    headroom: ApiHeadroom,
+    now: i64,
+    (configured, codex_enabled, openai_enabled): (impl Fn(StepId) -> bool, bool, bool),
+) -> RouteOutcome {
+    resolve_core(
+        role,
+        difficulty,
+        readings,
+        exhausted,
+        headroom,
+        now,
+        (
+            configured,
+            codex_enabled,
+            openai_enabled,
+            ProviderCounts::default(),
+        ),
+    )
+}
+
+/// Resolve with global provider reservations in addition to allowance and API headroom.
+pub fn resolve_with_groups(
+    role: Role,
+    difficulty: Difficulty,
+    readings: &[AccountReading],
+    exhausted: &[ExhaustedStep],
+    headroom: ApiHeadroom,
+    now: i64,
+    counts: ProviderCounts,
+) -> RouteOutcome {
+    resolve_core(
         role,
         difficulty,
         readings,
@@ -490,18 +693,24 @@ pub fn resolve(
             StepId::configured,
             CODEX_PLAN_ROUTING_ENABLED,
             OPENAI_API_ROUTING_ENABLED,
+            counts,
         ),
     )
 }
 
-fn resolve_with(
+fn resolve_core(
     role: Role,
     difficulty: Difficulty,
     readings: &[AccountReading],
     exhausted: &[ExhaustedStep],
     headroom: ApiHeadroom,
     now: i64,
-    (configured, codex_enabled, openai_enabled): (impl Fn(StepId) -> bool, bool, bool),
+    (configured, codex_enabled, openai_enabled, counts): (
+        impl Fn(StepId) -> bool,
+        bool,
+        bool,
+        ProviderCounts,
+    ),
 ) -> RouteOutcome {
     let mut rejections = Vec::new();
     for step in steps(role) {
@@ -537,6 +746,14 @@ fn resolve_with(
                 step: step.id,
                 model: step.model,
                 reason: format!("The {} step is not configured yet.", step.id.label()),
+            });
+            continue;
+        }
+        if let Some(reason) = counts.route_rejection(step.account, role == Role::Reviewer) {
+            rejections.push(StepRejection {
+                step: step.id,
+                model: step.model,
+                reason,
             });
             continue;
         }
@@ -1239,12 +1456,21 @@ mod tests {
     }
 
     #[test]
-    fn api_reset_uses_the_configured_day_of_the_next_month() {
+    fn api_reset_uses_each_providers_configured_utc_credit_day() {
         assert_eq!(crate::OPENAI_API_CREDIT_RESET_DAY, 1);
-        assert_eq!(crate::ANTHROPIC_API_CREDIT_RESET_DAY, 1);
+        assert_eq!(crate::ANTHROPIC_API_CREDIT_RESET_DAY, 27);
+        let claude_day = crate::ANTHROPIC_API_CREDIT_RESET_DAY;
         assert_eq!(
             claude_api_reset_at(days_from_civil(2026, 12, 1) * 86_400),
-            days_from_civil(2027, 1, 1) * 86_400
+            days_from_civil(2026, 12, claude_day) * 86_400
+        );
+        assert_eq!(
+            claude_api_reset_at(days_from_civil(2026, 12, claude_day) * 86_400),
+            days_from_civil(2027, 1, claude_day) * 86_400
+        );
+        assert_eq!(
+            claude_api_reset_at(days_from_civil(2026, 12, 31) * 86_400),
+            days_from_civil(2027, 1, claude_day) * 86_400
         );
         let noon = 12 * 3_600;
         let late_november = days_from_civil(2026, 11, 29) * 86_400 + noon;
@@ -1282,5 +1508,201 @@ mod claude_limit_tests {
         assert!(!is_claude_usage_limit(
             "Claude reported an error: rate limit reached for requests"
         ));
+    }
+}
+
+#[cfg(test)]
+mod provider_cap_tests {
+    use super::*;
+
+    #[test]
+    fn provider_caps_mapping_matches_every_route_and_distinguishes_accounts() {
+        for role in [Role::Implementer, Role::Reviewer, Role::Planner] {
+            for step in steps(role) {
+                let (agent, key) = match step.account {
+                    AccountKind::CodexPlan => ("codex", Some(CODEX_ACCOUNT_KEY_PLAN)),
+                    AccountKind::OpenAiApi => ("codex", Some(CODEX_ACCOUNT_KEY_API)),
+                    AccountKind::ClaudePlan => ("claude", Some(CLAUDE_ACCOUNT_KEY_PLAN_B)),
+                    AccountKind::ClaudeApi => ("claude", Some(CLAUDE_ACCOUNT_KEY_API_B)),
+                    AccountKind::DeepSeek => ("pi", None),
+                };
+                assert_eq!(
+                    provider_group(agent, step.model, key).unwrap().account(),
+                    step.account
+                );
+            }
+        }
+        for (agent, model, key, expected) in [
+            (
+                "codex",
+                MODEL_GPT_6_1_SOL,
+                None,
+                Some(ProviderGroup::CodexPlan),
+            ),
+            ("claude", MODEL_OPUS, None, Some(ProviderGroup::ClaudePlanA)),
+            (
+                "claude",
+                MODEL_OPUS,
+                Some(CLAUDE_ACCOUNT_KEY_PLAN_B),
+                Some(ProviderGroup::ClaudePlanB),
+            ),
+            (
+                "claude",
+                MODEL_HAIKU,
+                Some(CLAUDE_ACCOUNT_KEY_API_A),
+                Some(ProviderGroup::HaikuApiA),
+            ),
+            (
+                "claude",
+                MODEL_HAIKU,
+                Some(CLAUDE_ACCOUNT_KEY_API_B),
+                Some(ProviderGroup::HaikuApiB),
+            ),
+            ("pi", "another-model", None, None),
+            (
+                "codex",
+                MODEL_GPT_6_1_SOL,
+                Some(CODEX_ACCOUNT_KEY_API),
+                None,
+            ),
+            ("claude", MODEL_OPUS, Some(CLAUDE_ACCOUNT_KEY_API_A), None),
+        ] {
+            assert_eq!(provider_group(agent, model, key), expected);
+        }
+    }
+
+    #[test]
+    fn provider_caps_fall_through_and_report_every_full_account() {
+        let mut counts = ProviderCounts {
+            enabled_plan: [true; 2],
+            enabled_api: [true; 2],
+            ..Default::default()
+        };
+        for (group, role, expected) in [
+            (
+                ProviderGroup::CodexPlan,
+                Role::Implementer,
+                StepId::ImplementerClaude,
+            ),
+            (
+                ProviderGroup::ClaudePlanA,
+                Role::Implementer,
+                StepId::ImplementerClaude,
+            ),
+            (
+                ProviderGroup::ClaudePlanB,
+                Role::Implementer,
+                StepId::ImplementerDeepSeek,
+            ),
+            (
+                ProviderGroup::LunaApi,
+                Role::Reviewer,
+                StepId::ReviewerClaudeApi,
+            ),
+            (
+                ProviderGroup::HaikuApiA,
+                Role::Reviewer,
+                StepId::ReviewerClaudeApi,
+            ),
+            (
+                ProviderGroup::HaikuApiB,
+                Role::Reviewer,
+                StepId::ReviewerDeepSeek,
+            ),
+        ] {
+            counts.open[group as usize] = group.cap();
+            let RouteOutcome::Chosen(route) = resolve_with_groups(
+                role,
+                Difficulty::Simple,
+                &[],
+                &[],
+                ApiHeadroom::default(),
+                1,
+                counts,
+            ) else {
+                panic!()
+            };
+            assert_eq!(route.step, expected);
+            if group == ProviderGroup::HaikuApiB {
+                assert!(route.reason.contains("Haiku API account A"));
+                assert!(route.reason.contains("Haiku API account B"));
+                assert!(!route.reason.contains("marked exhausted"));
+            }
+        }
+        counts.open[ProviderGroup::DsfApi as usize] = MAX_OPEN_DSF_API_AGENTS;
+        for role in [Role::Implementer, Role::Reviewer, Role::Planner] {
+            let RouteOutcome::Exhausted(reasons) = resolve_with_groups(
+                role,
+                Difficulty::Simple,
+                &[],
+                &[],
+                ApiHeadroom::default(),
+                1,
+                counts,
+            ) else {
+                panic!()
+            };
+            assert_eq!(reasons.len(), steps(role).len());
+            assert!(
+                reasons
+                    .iter()
+                    .all(|reason| reason.reason.contains("Archive a finished chat"))
+            );
+        }
+    }
+
+    #[test]
+    fn provider_caps_reviewers_are_separate_per_account_and_do_not_limit_implementers() {
+        let mut counts = ProviderCounts {
+            enabled_plan: [true; 2],
+            enabled_api: [true; 2],
+            ..Default::default()
+        };
+        for group in ProviderGroup::ALL {
+            counts.reviewers[group as usize] = MAX_OPEN_REVIEWERS_PER_PROVIDER;
+            assert!(
+                counts
+                    .reviewer_rejection(group)
+                    .unwrap()
+                    .contains("reviewers open")
+            );
+        }
+        assert!(matches!(
+            resolve_with_groups(
+                Role::Reviewer,
+                Difficulty::Simple,
+                &[],
+                &[],
+                ApiHeadroom::default(),
+                1,
+                counts
+            ),
+            RouteOutcome::Exhausted(_)
+        ));
+        let RouteOutcome::Chosen(route) = resolve_with_groups(
+            Role::Implementer,
+            Difficulty::Simple,
+            &[],
+            &[],
+            ApiHeadroom::default(),
+            1,
+            counts,
+        ) else {
+            panic!()
+        };
+        assert_eq!(route.step, StepId::ImplementerCodexPlan);
+        counts.reviewers[ProviderGroup::HaikuApiB as usize] = 0;
+        let RouteOutcome::Chosen(route) = resolve_with_groups(
+            Role::Reviewer,
+            Difficulty::Simple,
+            &[],
+            &[],
+            ApiHeadroom::default(),
+            1,
+            counts,
+        ) else {
+            panic!()
+        };
+        assert_eq!(route.step, StepId::ReviewerClaudeApi);
     }
 }

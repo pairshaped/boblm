@@ -2,7 +2,7 @@
 
 BobLM does not detect or interrupt back-and-forth messaging between chats. Runaway
 work is bounded by mechanisms that measure work, not conversation shape: one level
-of subagents with at most three open per root (ADR 0043), the per-round runaway
+of subagents with global provider caps (ADR 0043), the per-round runaway
 limit on subagents, which pauses one and asks its parent to decide (ADR 0043), and
 per-minute token headroom for API reviewers.
 

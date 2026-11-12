@@ -53,3 +53,28 @@ pub fn receipt(conn: impl MutationConnection, params: ReceiptParams<'_>) -> Resu
         ],
     )
 }
+
+const OPEN_PROVIDER_MEMBERS_SQL: &str = r"SELECT s.account_key, s.agent, s.model, s.role
+FROM sessions s
+WHERE s.archived = 0";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpenProviderMembersRow {
+    pub account_key: Option<String>,
+    pub agent: String,
+    pub model: String,
+    pub role: Option<String>,
+}
+
+pub fn open_provider_members(conn: &Connection) -> Result<Vec<OpenProviderMembersRow>> {
+    let mut stmt = conn.prepare_cached(OPEN_PROVIDER_MEMBERS_SQL)?;
+    let rows = stmt.query_map([], |row| {
+        Ok(OpenProviderMembersRow {
+            account_key: row.get(0)?,
+            agent: row.get(1)?,
+            model: row.get(2)?,
+            role: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}

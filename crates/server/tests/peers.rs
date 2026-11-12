@@ -1256,10 +1256,8 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
     .await;
     assert_eq!(nested["result"]["isError"], true);
 
-    for (index, id) in [
-        (2, "00000000-0000-4000-8000-000000000102"),
-        (3, "00000000-0000-4000-8000-000000000103"),
-    ] {
+    for index in 2..=boblm_tuning::MAX_OPEN_DSF_API_AGENTS + 1 {
+        let id = format!("00000000-0000-4000-8000-{:012}", 100 + index);
         let reply = tool_value(
             &call(
                 &router,
@@ -1282,7 +1280,7 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
         token,
         "caller",
         "spawn_subagent",
-        serde_json::json!({"title":"Spawned chat","requestId":"00000000-0000-4000-8000-000000000104","message":"too many","role":"implementer","difficulty":"simple"}),
+        serde_json::json!({"title":"Spawned chat","requestId":"00000000-0000-4000-8000-000000000199","message":"too many","role":"implementer","difficulty":"simple"}),
     )
     .await;
     assert_eq!(over["result"]["isError"], true);
@@ -1572,6 +1570,19 @@ async fn role_spawn_peer_creates_a_visible_root_with_the_resolved_choice() {
     )
     .await;
     assert_eq!(reviewer_difficulty["result"]["isError"], true);
+    let reviewer_root = call(
+        &router,
+        token,
+        "caller",
+        "spawn_peer",
+        serde_json::json!({"title":"Spawned chat","requestId":"00000000-0000-4000-8000-000000000204","message":"review","role":"reviewer"}),
+    )
+    .await;
+    assert_eq!(reviewer_root["result"]["isError"], true);
+    let text = reviewer_root["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+    assert!(text.contains("spawn_subagent"), "{text}");
     app.shutdown().await.unwrap();
 }
 
@@ -2145,33 +2156,33 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
             "message":"review this", "role":"reviewer"
         })
     };
-    for id in 1..boblm_tuning::OPENAI_API_MAX_ACTIVE_REVIEWERS as u64 {
+    for id in 1..boblm_tuning::MAX_OPEN_REVIEWERS_PER_PROVIDER as u64 {
         let spawned = tool_value(
             &call(
                 &router,
                 "reviewer-headroom-token",
                 "caller",
-                "spawn_peer",
+                "spawn_subagent",
                 args(id),
             )
             .await,
         );
         assert_eq!(spawned["routing"]["step"], "reviewer-openai-api");
     }
-    let cap = boblm_tuning::OPENAI_API_MAX_ACTIVE_REVIEWERS as u64;
+    let cap = boblm_tuning::MAX_OPEN_REVIEWERS_PER_PROVIDER as u64;
     let (first, second) = tokio::join!(
         call(
             &router,
             "reviewer-headroom-token",
             "caller",
-            "spawn_peer",
+            "spawn_subagent",
             args(cap)
         ),
         call(
             &router,
             "reviewer-headroom-token",
             "caller",
-            "spawn_peer",
+            "spawn_subagent",
             args(cap + 1)
         )
     );
@@ -2205,14 +2216,14 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
         fallback["routing"]["reason"]
             .as_str()
             .unwrap()
-            .contains("cap of")
+            .contains("Luna API group has")
     );
     let repeated = tool_value(
         &call(
             &router,
             "reviewer-headroom-token",
             "caller",
-            "spawn_peer",
+            "spawn_subagent",
             args(1),
         )
         .await,
@@ -2234,7 +2245,90 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
             )
             .unwrap()
             .active_reviewers,
-        boblm_tuning::OPENAI_API_MAX_ACTIVE_REVIEWERS
+        boblm_tuning::MAX_OPEN_REVIEWERS_PER_PROVIDER
+    );
+    app.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_subagent_asking_for_a_reviewer_is_told_to_message_its_parent() {
+    let temp = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
+    let store = Store::open(temp.path().join("reviewer-from-subagent.sqlite")).unwrap();
+    store
+        .create_session("root", temp.path().to_str().unwrap(), 1)
+        .unwrap();
+    let project = store
+        .reader()
+        .unwrap()
+        .sessions()
+        .unwrap()
+        .into_iter()
+        .find(|session| session.id == "root")
+        .and_then(|session| session.project_id)
+        .unwrap();
+    let child = "10000000-0000-4000-8000-000000000701";
+    store
+        .spawn_peer(boblm_store::PeerSpawn {
+            request_id: child.into(),
+            caller: "root".into(),
+            arguments: r#"{"message":"work"}"#.into(),
+            project_id: project,
+            agent: "claude".into(),
+            model: "sonnet".into(),
+            effort: "high".into(),
+            title: "Helper".into(),
+            content: "work".into(),
+            created_at: 3,
+            parent_session_id: Some("root".into()),
+            root_session_id: Some("root".into()),
+            role: Some("implementer".into()),
+            resolved: None,
+            working_directory: None,
+            account_key: None,
+        })
+        .unwrap();
+    let (inputs, _received) = tokio::sync::mpsc::unbounded_channel();
+    let token = "reviewer-from-subagent-token";
+    let app = App::open(
+        store.clone(),
+        Arc::new(SpawnFactory { inputs }),
+        token.into(),
+    )
+    .await
+    .unwrap();
+    let router = app.router(Some(temp.path().into()));
+    let args = |id: &str| serde_json::json!({"title":"Review","requestId":id,"message":"review this","role":"reviewer"});
+    let from_root = call(
+        &router,
+        token,
+        "root",
+        "spawn_peer",
+        args("00000000-0000-4000-8000-000000000702"),
+    )
+    .await;
+    assert_eq!(from_root["result"]["isError"], true);
+    let text = from_root["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Call spawn_subagent with role reviewer"),
+        "{text}"
+    );
+    assert!(!text.contains("message_parent"), "{text}");
+    let from_child = call(
+        &router,
+        token,
+        child,
+        "spawn_peer",
+        args("00000000-0000-4000-8000-000000000703"),
+    )
+    .await;
+    assert_eq!(from_child["result"]["isError"], true);
+    let text = from_child["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("message_parent"), "{text}");
+    assert!(!text.contains("Call spawn_subagent"), "{text}");
+    assert_eq!(
+        store.reader().unwrap().sessions().unwrap().len(),
+        2,
+        "a refused reviewer must not create a chat"
     );
     app.shutdown().await.unwrap();
 }
