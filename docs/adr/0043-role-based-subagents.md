@@ -28,21 +28,24 @@ or state-machine logic, payments, auth or credentials, risky migrations, or subt
 cross-module design. The routing order is:
 
 1. Sol on the Codex plan allowance, medium or high.
-2. Sol on the Codex plan credits while the balance is positive, medium or high.
-3. Sonnet on a Claude plan, medium or high, until the account reaches the 2% cutoff.
+2. Sonnet on a Claude plan, medium or high, until the account reaches the 2% cutoff.
    There is no reserve: Sonnet only runs once Sol is used up, so it may drain Claude
    to the cutoff (ADR 0047).
-4. DeepSeek V4.1 Flash 1017 through Pi, medium or high.
 
-Reviewers take no difficulty:
+Reviewers take no difficulty. A step is skipped for any reason (spent money, headroom,
+caps, disabled, not configured):
 
 1. Luna on the OpenAI API credit while API headroom is available, xhigh.
-2. Luna on the Codex plan weekly allowance, xhigh, whenever the API step is
-   unavailable because of headroom, the active-reviewer cap, TPM cooldown, credit
-   exhaustion or disabled API routing. This step uses `reviewer-codex-plan`, the
-   `codex-plan` account key and normal plan exhaustion marks.
-3. Haiku on the Claude Platform API credit, high.
-4. DeepSeek V4.1 Flash 1017 through Pi, high.
+2. Haiku on the Claude Platform API credit, xhigh, accounts A then B.
+
+Reviewers never run on a plan, and no reviewer fallback exists after API money is
+spent. A reviewer spawn is refused when both steps are unavailable, with one reason
+per step (and the slot-freeing advice once when a cap caused any of them).
+
+DeepSeek is in no automated route. Use `spawn_peer` with an explicit model for it.
+The step ids `implementer-codex-credits`, `implementer-deepseek`, `reviewer-codex-plan`
+and `reviewer-deepseek` still parse so stored sessions and receipts stay readable;
+routing never produces them.
 
 Every Claude plan step chooses independently among enabled accounts, draining
 the one whose weekly reset comes first until it has
@@ -57,13 +60,13 @@ remain readable. Reviewers do independent code review; implementers own
 implementation and repairs.
 
 `CODEX_PLAN_ROUTING_ENABLED` and `OPENAI_API_ROUTING_ENABLED` are documented
-tunables, both true. Disabling the first skips Sol plan and credits steps and the
-Luna plan step; disabling the second skips Luna API reviews. The route reason names the flag,
+tunables, both true. Disabling the first skips the Sol plan step;
+disabling the second skips Luna API reviews. The route reason names the flag,
 for example "disabled by CODEX_PLAN_ROUTING_ENABLED". Drivers, the model catalog
 and explicit model choices keep working. There is no settings screen (ADR 0018).
 
 The OpenAI API credit is reserved for Luna reviews. Implementers use the ordered
-plan, credits, Claude and DeepSeek chain above.
+Codex plan and Claude chain above.
 A reading
 past its reset counts as available, and a plan account with no reading counts as
 available. A step with an
@@ -80,7 +83,7 @@ last day when it is shorter. The Claude API account has $200 of monthly credit;
 quota or billing rejection marks that API account exhausted until the next
 `ANTHROPIC_API_CREDIT_RESET_DAY` UTC, the 27th. This is account A's monthly credit
 grant day, independent of billing. Account B shares it until the owner links B
-and confirms its grant day. It uses exhaustion marks, without the Claude plan cutoff. A step with no known reset, currently DeepSeek, is
+and confirms its grant day. It uses exhaustion marks, without the Claude plan cutoff. A mark with no known reset is
 retried after `ROLE_EXHAUSTION_RETRY` (one hour). The resolver reads the marks in
 the same request that chooses a route, so a marked step is skipped immediately.
 
@@ -117,8 +120,8 @@ of the usage records contained 983 API Luna calls in the latest day, averaging
 about 742,000 tokens before counting recent completed requests. This is a spawn guard, not a guarantee against a provider rate limit;
 long reviews keep their account and may send several requests per minute.
 The route reason includes the measured number that blocked an API spawn and
-the chosen fallback. Luna plan fallback requires weekly allowance and enabled
-Codex plan routing. Haiku API fallback depends on credit exhaustion marks.
+the chosen fallback. Haiku API fallback depends on credit exhaustion marks and the
+per-account Haiku caps.
 
 The role table, efforts and model IDs are constants in `crates/tuning`. The
 resolver is pure: `resolve(role, difficulty, readings, exhausted_marks, api_headroom, now)`
@@ -158,10 +161,11 @@ The caps are `OPENAI_API_MAX_ACTIVE_REVIEWERS` (3) for Luna API,
 `MAX_OPEN_HAIKU_API_AGENTS` (3) per Claude API account,
 `MAX_OPEN_CODEX_PLAN_AGENTS` (10), `MAX_OPEN_CLAUDE_PLAN_AGENTS` (10) per Claude
 plan account, and `MAX_OPEN_DSF_API_AGENTS` (5).
-Codex plan includes Sol implementers on allowance or credits and Luna plan reviewers.
+Codex plan includes Sol implementers. Reviewers are never routed there, though any open
+session already on the Codex plan still counts toward its cap.
 Claude plan includes Sonnet implementers and Opus planners, with independent caps
 for accounts A and B. Haiku API also has independent caps for accounts A and B.
-DSF API includes both Pi role steps. Full Claude accounts are removed before
+DSF API counts explicit-model DeepSeek chats. Full Claude accounts are removed before
 selection. Plan accounts retain reset-first ordering and the allowance cutoff;
 API accounts retain configuration order and individual credit exhaustion checks.
 A Claude step falls through only when every enabled account is unavailable, with

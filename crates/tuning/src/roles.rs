@@ -98,11 +98,15 @@ impl AccountKind {
 pub enum StepId {
     ImplementerCodexPlan,
     ImplementerClaude,
+    /// Exists only to read old receipts and stored sessions. Routing never produces it.
     ImplementerCodexCredits,
+    /// Exists only to read old receipts and stored sessions. Routing never produces it.
     ImplementerDeepSeek,
     ReviewerOpenAiApi,
+    /// Exists only to read old receipts and stored sessions. Routing never produces it.
     ReviewerCodexPlan,
     ReviewerClaudeApi,
+    /// Exists only to read old receipts and stored sessions. Routing never produces it.
     ReviewerDeepSeek,
     PlannerClaude,
 }
@@ -168,12 +172,8 @@ impl StepId {
             self,
             Self::ImplementerCodexPlan
                 | Self::ImplementerClaude
-                | Self::ImplementerCodexCredits
-                | Self::ImplementerDeepSeek
                 | Self::ReviewerOpenAiApi
-                | Self::ReviewerCodexPlan
                 | Self::ReviewerClaudeApi
-                | Self::ReviewerDeepSeek
                 | Self::PlannerClaude
         )
     }
@@ -197,29 +197,15 @@ pub const IMPLEMENTER_STEPS: &[RoleStep] = &[
         account: AccountKind::CodexPlan,
     },
     RoleStep {
-        id: StepId::ImplementerCodexCredits,
-        model: MODEL_GPT_6_1_SOL,
-        simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
-        hard_effort: ROLE_IMPLEMENTER_HARD_EFFORT,
-        account: AccountKind::CodexPlan,
-    },
-    RoleStep {
         id: StepId::ImplementerClaude,
         model: MODEL_SONNET,
         simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
         hard_effort: ROLE_IMPLEMENTER_HARD_EFFORT,
         account: AccountKind::ClaudePlan,
     },
-    RoleStep {
-        id: StepId::ImplementerDeepSeek,
-        model: MODEL_DEEPSEEK_V41_FLASH,
-        simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
-        hard_effort: ROLE_IMPLEMENTER_HARD_EFFORT,
-        account: AccountKind::DeepSeek,
-    },
 ];
 
-/// Ordered reviewer models and accounts.
+/// Ordered reviewer models and accounts. No reviewer fallback exists after API money is spent.
 pub const REVIEWER_STEPS: &[RoleStep] = &[
     RoleStep {
         id: StepId::ReviewerOpenAiApi,
@@ -229,25 +215,11 @@ pub const REVIEWER_STEPS: &[RoleStep] = &[
         account: AccountKind::OpenAiApi,
     },
     RoleStep {
-        id: StepId::ReviewerCodexPlan,
-        model: MODEL_GPT_6_LUNA,
-        simple_effort: ROLE_REVIEWER_LUNA_EFFORT,
-        hard_effort: ROLE_REVIEWER_LUNA_EFFORT,
-        account: AccountKind::CodexPlan,
-    },
-    RoleStep {
         id: StepId::ReviewerClaudeApi,
         model: MODEL_HAIKU,
         simple_effort: ROLE_REVIEWER_HAIKU_EFFORT,
         hard_effort: ROLE_REVIEWER_HAIKU_EFFORT,
         account: AccountKind::ClaudeApi,
-    },
-    RoleStep {
-        id: StepId::ReviewerDeepSeek,
-        model: MODEL_DEEPSEEK_V41_FLASH,
-        simple_effort: ROLE_REVIEWER_DEEPSEEK_EFFORT,
-        hard_effort: ROLE_REVIEWER_DEEPSEEK_EFFORT,
-        account: AccountKind::DeepSeek,
     },
 ];
 
@@ -275,7 +247,6 @@ pub struct AccountReading {
     pub account: AccountKind,
     pub weekly_used_percent: Option<f64>,
     pub weekly_resets_at: Option<i64>,
-    pub credits_balance: Option<f64>,
 }
 
 /// A provider billing account with its own open-chat and reviewer caps.
@@ -465,7 +436,7 @@ impl ApiHeadroom {
         let budget = OPENAI_API_TPM_LIMIT as f64 * OPENAI_API_TPM_BUDGET;
         if total as f64 >= budget {
             return Err(format!(
-                "OpenAI API used {} tokens in the last minute plus {} projected tokens, about {:.1}M of its {:.1}M-token spawn budget. Wait for API headroom or use the next reviewer step.",
+                "OpenAI API used {} tokens in the last minute plus {} projected tokens, about {:.1}M of its {:.1}M-token spawn budget. Wait for API headroom or let the reviewer fall back to Haiku on the Claude API.",
                 self.recent_tokens,
                 self.projected_tokens,
                 total as f64 / 1_000_000.0,
@@ -474,7 +445,7 @@ impl ApiHeadroom {
         }
         if self.active_reviewers >= OPENAI_API_MAX_ACTIVE_REVIEWERS {
             return Err(format!(
-                "OpenAI API has {} active reviewers, at or above its cap of {}. Wait for a reviewer to become idle or use the next reviewer step.",
+                "OpenAI API has {} active reviewers, at or above its cap of {}. Wait for a reviewer to become idle or let the reviewer fall back to Haiku on the Claude API.",
                 self.active_reviewers, OPENAI_API_MAX_ACTIVE_REVIEWERS
             ));
         }
@@ -732,13 +703,7 @@ fn resolve_core(
     let mut rejections = Vec::new();
     for step in steps(role) {
         let disabled = match step.id {
-            StepId::ImplementerCodexPlan
-            | StepId::ImplementerCodexCredits
-            | StepId::ReviewerCodexPlan
-                if !codex_enabled =>
-            {
-                Some("CODEX_PLAN_ROUTING_ENABLED")
-            }
+            StepId::ImplementerCodexPlan if !codex_enabled => Some("CODEX_PLAN_ROUTING_ENABLED"),
             StepId::ReviewerOpenAiApi if !openai_enabled => Some("OPENAI_API_ROUTING_ENABLED"),
             _ => None,
         };
@@ -793,16 +758,15 @@ fn resolve_core(
             .iter()
             .find(|reading| reading.account == step.account);
         let reason = match step.id {
-            StepId::ImplementerCodexPlan
+            StepId::ImplementerCodexPlan | StepId::ImplementerClaude | StepId::PlannerClaude => {
+                weekly_plan_reason(step.account, reading, now)
+            }
+            // Kept only to read old receipts; no role chain contains them.
+            StepId::ImplementerCodexCredits
             | StepId::ReviewerCodexPlan
-            | StepId::ImplementerClaude
-            | StepId::PlannerClaude => weekly_plan_reason(step.account, reading, now),
-            StepId::ImplementerCodexCredits => codex_credits_reason(reading),
+            | StepId::ImplementerDeepSeek
+            | StepId::ReviewerDeepSeek => continue,
             StepId::ReviewerOpenAiApi => headroom.reason(),
-            StepId::ImplementerDeepSeek | StepId::ReviewerDeepSeek => Ok(format!(
-                "{} is the last step and has no allowance window.",
-                step.id.label()
-            )),
             StepId::ReviewerClaudeApi => {
                 Ok("Claude API credit has no active quota or billing exhaustion mark.".into())
             }
@@ -874,18 +838,6 @@ fn weekly_plan_reason(
     }
 }
 
-fn codex_credits_reason(reading: Option<&AccountReading>) -> Result<String, String> {
-    match reading.and_then(|reading| reading.credits_balance) {
-        Some(balance) if balance > 0.0 => {
-            Ok(format!("The Codex plan credit balance is {balance:.2}."))
-        }
-        Some(balance) => Err(format!(
-            "The Codex plan credit balance is {balance:.2}, which is not positive."
-        )),
-        None => Err("The Codex plan credit balance has not been reported.".into()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -894,47 +846,26 @@ mod tests {
         true
     }
 
-    fn reading(
-        account: AccountKind,
-        used: Option<f64>,
-        reset: Option<i64>,
-        credits: Option<f64>,
-    ) -> AccountReading {
+    fn reading(account: AccountKind, used: Option<f64>, reset: Option<i64>) -> AccountReading {
         AccountReading {
             account,
             weekly_used_percent: used,
             weekly_resets_at: reset,
-            credits_balance: credits,
         }
     }
 
     #[test]
     fn routing_chains_walk_every_available_exhausted_and_disabled_step() {
         let now = 1000;
-        let readings = [reading(
-            AccountKind::CodexPlan,
-            Some(0.0),
-            Some(2000),
-            Some(10.0),
-        )];
+        let readings = [reading(AccountKind::CodexPlan, Some(0.0), Some(2000))];
         for (role, expected) in [
             (
                 Role::Implementer,
-                vec![
-                    StepId::ImplementerCodexPlan,
-                    StepId::ImplementerCodexCredits,
-                    StepId::ImplementerClaude,
-                    StepId::ImplementerDeepSeek,
-                ],
+                vec![StepId::ImplementerCodexPlan, StepId::ImplementerClaude],
             ),
             (
                 Role::Reviewer,
-                vec![
-                    StepId::ReviewerOpenAiApi,
-                    StepId::ReviewerCodexPlan,
-                    StepId::ReviewerClaudeApi,
-                    StepId::ReviewerDeepSeek,
-                ],
+                vec![StepId::ReviewerOpenAiApi, StepId::ReviewerClaudeApi],
             ),
         ] {
             assert_eq!(
@@ -946,9 +877,7 @@ mod tests {
                     .iter()
                     .copied()
                     .filter(|step| match step {
-                        StepId::ImplementerCodexPlan
-                        | StepId::ImplementerCodexCredits
-                        | StepId::ReviewerCodexPlan => codex,
+                        StepId::ImplementerCodexPlan => codex,
                         StepId::ReviewerOpenAiApi => openai,
                         _ => true,
                     })
@@ -985,7 +914,7 @@ mod tests {
                                     .reason
                                     .matches("disabled by CODEX_PLAN_ROUTING_ENABLED")
                                     .count(),
-                                2
+                                1
                             );
                         }
                         if !openai && role == Role::Reviewer {
@@ -1031,12 +960,7 @@ mod tests {
             let result = resolve(
                 Role::Planner,
                 Difficulty::Simple,
-                &[reading(
-                    AccountKind::ClaudePlan,
-                    Some(used),
-                    Some(reset),
-                    None,
-                )],
+                &[reading(AccountKind::ClaudePlan, Some(used), Some(reset))],
                 &[],
                 ApiHeadroom::default(),
                 1000,
@@ -1132,26 +1056,20 @@ mod tests {
     #[test]
     fn sonnet_implementers_drain_claude_to_the_cutoff() {
         let now = 1_000_000;
-        let configured = |step| {
-            matches!(
-                step,
-                StepId::ImplementerClaude | StepId::ImplementerDeepSeek
-            )
-        };
+        let configured = |step| matches!(step, StepId::ImplementerClaude);
         // No reserve: days to reset never matter, only the 2% cutoff.
         for (used, days, expected) in [
-            (10.0, 6.0, StepId::ImplementerClaude),
-            (97.9, 6.0, StepId::ImplementerClaude),
-            (97.9, 0.1, StepId::ImplementerClaude),
-            (98.5, 6.0, StepId::ImplementerDeepSeek),
+            (10.0, 6.0, Some(StepId::ImplementerClaude)),
+            (97.9, 6.0, Some(StepId::ImplementerClaude)),
+            (97.9, 0.1, Some(StepId::ImplementerClaude)),
+            (98.5, 6.0, None),
         ] {
             let readings = [reading(
                 AccountKind::ClaudePlan,
                 Some(used),
                 Some(now + (days * 86_400.0) as i64),
-                None,
             )];
-            let RouteOutcome::Chosen(chosen) = resolve_with(
+            let outcome = resolve_with(
                 Role::Implementer,
                 Difficulty::Simple,
                 &readings,
@@ -1163,82 +1081,137 @@ mod tests {
                     CODEX_PLAN_ROUTING_ENABLED,
                     OPENAI_API_ROUTING_ENABLED,
                 ),
-            ) else {
-                panic!()
+            );
+            let chosen = match outcome {
+                RouteOutcome::Chosen(chosen) => Some(chosen.step),
+                RouteOutcome::Exhausted(_) => None,
             };
-            assert_eq!(chosen.step, expected, "{used}% used, {days} days left");
+            assert_eq!(chosen, expected, "{used}% used, {days} days left");
         }
     }
 
     #[test]
-    fn codex_plan_credits_and_api_steps_are_ordered() {
+    fn implementers_use_the_codex_plan_then_claude_and_never_codex_credits() {
         let now = 1_000_000;
         let reset = now + 86_400;
-        let readings = [reading(
-            AccountKind::CodexPlan,
-            Some(99.0),
-            Some(reset),
-            Some(10.0),
-        )];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
+        let routed = |readings: &[AccountReading]| {
+            let RouteOutcome::Chosen(chosen) = resolve_with(
+                Role::Implementer,
+                Difficulty::Hard,
+                readings,
+                &[],
+                ApiHeadroom::default(),
+                now,
+                (
+                    all_configured,
+                    CODEX_PLAN_ROUTING_ENABLED,
+                    OPENAI_API_ROUTING_ENABLED,
+                ),
+            ) else {
+                panic!()
+            };
+            chosen.step
+        };
+        assert_eq!(
+            routed(&[reading(AccountKind::CodexPlan, Some(99.0), Some(reset))]),
+            StepId::ImplementerCodexPlan
+        );
+        // With the Codex plan allowance exhausted, an implementer goes to Sonnet on Claude.
+        let sonnet = routed(&[
+            reading(AccountKind::CodexPlan, Some(100.0), Some(reset)),
+            reading(AccountKind::ClaudePlan, Some(10.0), Some(reset)),
+        ]);
+        assert_eq!(sonnet, StepId::ImplementerClaude);
+        let RouteOutcome::Exhausted(rejections) = resolve_with(
             Role::Implementer,
             Difficulty::Hard,
-            &readings,
+            &[
+                reading(AccountKind::CodexPlan, Some(100.0), Some(reset)),
+                reading(AccountKind::ClaudePlan, Some(100.0), Some(reset)),
+            ],
             &[],
             ApiHeadroom::default(),
             now,
-            (
-                all_configured,
-                CODEX_PLAN_ROUTING_ENABLED,
-                OPENAI_API_ROUTING_ENABLED,
-            ),
+            (all_configured, true, true),
         ) else {
             panic!()
         };
-        assert_eq!(chosen.step, StepId::ImplementerCodexPlan);
+        assert_eq!(
+            rejections.iter().map(|r| r.step).collect::<Vec<_>>(),
+            vec![StepId::ImplementerCodexPlan, StepId::ImplementerClaude]
+        );
+        assert!(IMPLEMENTER_STEPS.iter().all(|step| {
+            step.id != StepId::ImplementerCodexCredits && step.id != StepId::ImplementerDeepSeek
+        }));
+        assert_eq!(
+            StepId::parse("implementer-codex-credits"),
+            Some(StepId::ImplementerCodexCredits)
+        );
+    }
 
-        let readings = [
-            reading(AccountKind::CodexPlan, Some(100.0), Some(reset), Some(10.0)),
-            reading(AccountKind::ClaudePlan, Some(100.0), Some(reset), None),
-        ];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
-            Role::Implementer,
-            Difficulty::Hard,
-            &readings,
-            &[],
-            ApiHeadroom::default(),
-            now,
-            (
-                all_configured,
-                CODEX_PLAN_ROUTING_ENABLED,
-                OPENAI_API_ROUTING_ENABLED,
-            ),
-        ) else {
-            panic!()
-        };
-        assert_eq!(chosen.step, StepId::ImplementerCodexCredits);
+    #[test]
+    fn reviewers_never_route_to_a_plan_or_deepseek_under_any_readings() {
+        let now = 1000;
+        let api = [StepId::ReviewerOpenAiApi, StepId::ReviewerClaudeApi];
+        let marks: Vec<_> = api
+            .iter()
+            .map(|&step| ExhaustedStep {
+                step,
+                until: now + 100,
+            })
+            .collect();
+        for used in [None, Some(0.0), Some(100.0)] {
+            let readings = [
+                reading(AccountKind::CodexPlan, used, Some(now + 100)),
+                reading(AccountKind::ClaudePlan, used, Some(now + 100)),
+            ];
+            for n in 0..=api.len() {
+                for (codex, openai) in [(true, true), (false, true), (true, false), (false, false)]
+                {
+                    let outcome = resolve_with(
+                        Role::Reviewer,
+                        Difficulty::Simple,
+                        &readings,
+                        &marks[..n],
+                        ApiHeadroom::default(),
+                        now,
+                        (StepId::configured, codex, openai),
+                    );
+                    match outcome {
+                        RouteOutcome::Chosen(route) => {
+                            assert!(api.contains(&route.step));
+                            assert_ne!(route.account, AccountKind::CodexPlan);
+                            assert_ne!(route.account, AccountKind::ClaudePlan);
+                            assert_ne!(route.account, AccountKind::DeepSeek);
+                            assert!(!route.reason.contains("Codex plan"));
+                        }
+                        RouteOutcome::Exhausted(rejections) => {
+                            assert_eq!(n, api.len());
+                            assert_eq!(rejections.iter().map(|r| r.step).collect::<Vec<_>>(), api);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(REVIEWER_STEPS.iter().all(|step| {
+            step.id != StepId::ReviewerCodexPlan && step.id != StepId::ReviewerDeepSeek
+        }));
+        assert_eq!(
+            StepId::parse("reviewer-codex-plan"),
+            Some(StepId::ReviewerCodexPlan)
+        );
+        assert_eq!(StepId::ReviewerCodexPlan.as_str(), "reviewer-codex-plan");
+        assert!(!StepId::ReviewerCodexPlan.configured());
+    }
 
-        let readings = [
-            reading(AccountKind::CodexPlan, Some(100.0), Some(reset), Some(0.0)),
-            reading(AccountKind::ClaudePlan, Some(100.0), Some(reset), None),
-        ];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
-            Role::Implementer,
-            Difficulty::Hard,
-            &readings,
-            &[],
-            ApiHeadroom::default(),
-            now,
-            (
-                all_configured,
-                CODEX_PLAN_ROUTING_ENABLED,
-                OPENAI_API_ROUTING_ENABLED,
-            ),
-        ) else {
-            panic!()
-        };
-        assert_eq!(chosen.step, StepId::ImplementerDeepSeek);
+    #[test]
+    fn haiku_reviewer_effort_is_xhigh() {
+        assert_eq!(ROLE_REVIEWER_HAIKU_EFFORT, "xhigh");
+    }
 
+    #[test]
+    fn reviewers_start_at_luna_on_the_api() {
+        let now = 1000;
         let RouteOutcome::Chosen(chosen) = resolve_with(
             Role::Reviewer,
             Difficulty::Simple,
@@ -1262,17 +1235,12 @@ mod tests {
     #[test]
     fn exhausted_marks_skip_until_their_reset_and_past_marks_are_ignored() {
         let now = 1_000_000;
-        let configured = |step| {
-            matches!(
-                step,
-                StepId::ImplementerClaude | StepId::ImplementerDeepSeek
-            )
-        };
+        let configured = |step| matches!(step, StepId::ImplementerClaude);
         let marks = [ExhaustedStep {
             step: StepId::ImplementerClaude,
             until: now + 10,
         }];
-        let RouteOutcome::Chosen(chosen) = resolve_with(
+        let RouteOutcome::Exhausted(rejections) = resolve_with(
             Role::Implementer,
             Difficulty::Simple,
             &[],
@@ -1287,7 +1255,10 @@ mod tests {
         ) else {
             panic!()
         };
-        assert_eq!(chosen.step, StepId::ImplementerDeepSeek);
+        assert!(rejections.iter().any(|rejection| {
+            rejection.step == StepId::ImplementerClaude
+                && rejection.reason.contains("marked exhausted")
+        }));
 
         let marks = [ExhaustedStep {
             step: StepId::ImplementerClaude,
@@ -1316,15 +1287,7 @@ mod tests {
                 until: now + 10,
             },
             ExhaustedStep {
-                step: StepId::ImplementerCodexCredits,
-                until: now + 10,
-            },
-            ExhaustedStep {
                 step: StepId::ImplementerClaude,
-                until: now + 10,
-            },
-            ExhaustedStep {
-                step: StepId::ImplementerDeepSeek,
                 until: now + 10,
             },
         ];
@@ -1339,22 +1302,18 @@ mod tests {
             panic!()
         };
         assert!(rejections.iter().any(|rejection| {
-            rejection.step == StepId::ImplementerDeepSeek
-                && rejection.reason.contains("marked exhausted")
-        }));
-        assert!(rejections.iter().any(|rejection| {
             rejection.step == StepId::ImplementerClaude
                 && rejection.reason.contains("marked exhausted")
         }));
     }
 
     #[test]
-    fn reviewer_headroom_falls_back_to_codex_plan() {
+    fn reviewer_headroom_falls_back_to_haiku() {
         let budget = (OPENAI_API_TPM_LIMIT as f64 * OPENAI_API_TPM_BUDGET) as u64;
         for (tokens, projected, active, expected) in [
             (budget - 1, 0, 0, StepId::ReviewerOpenAiApi),
-            (budget, 0, 0, StepId::ReviewerCodexPlan),
-            (budget - 1, 1, 0, StepId::ReviewerCodexPlan),
+            (budget, 0, 0, StepId::ReviewerClaudeApi),
+            (budget - 1, 1, 0, StepId::ReviewerClaudeApi),
             (
                 0,
                 0,
@@ -1365,7 +1324,7 @@ mod tests {
                 0,
                 0,
                 OPENAI_API_MAX_ACTIVE_REVIEWERS,
-                StepId::ReviewerCodexPlan,
+                StepId::ReviewerClaudeApi,
             ),
         ] {
             let RouteOutcome::Chosen(route) = resolve(
@@ -1383,64 +1342,11 @@ mod tests {
                 panic!()
             };
             assert_eq!(route.step, expected);
-            if expected == StepId::ReviewerCodexPlan {
-                assert_eq!(route.model, MODEL_GPT_6_LUNA);
-                assert_eq!(route.effort, ROLE_REVIEWER_LUNA_EFFORT);
-                assert_eq!(route.account, AccountKind::CodexPlan);
-            }
-        }
-    }
-
-    #[test]
-    fn reviewer_plan_fallback_obeys_allowance_marks_and_flags() {
-        let now = 1000;
-        for (codex, openai, used, marked, haiku_marked, expected) in [
-            (true, false, 99.9, false, false, StepId::ReviewerCodexPlan),
-            (true, true, 99.9, false, false, StepId::ReviewerCodexPlan),
-            (true, true, 100.0, false, false, StepId::ReviewerClaudeApi),
-            (false, true, 0.0, false, false, StepId::ReviewerClaudeApi),
-            (true, true, 0.0, true, false, StepId::ReviewerClaudeApi),
-            (true, true, 100.0, false, true, StepId::ReviewerDeepSeek),
-        ] {
-            let mut marks = vec![ExhaustedStep {
-                step: StepId::ReviewerOpenAiApi,
-                until: now + 120,
-            }];
-            if marked {
-                marks.push(ExhaustedStep {
-                    step: StepId::ReviewerCodexPlan,
-                    until: now + 100,
-                });
-            }
-            if haiku_marked {
-                marks.push(ExhaustedStep {
-                    step: StepId::ReviewerClaudeApi,
-                    until: now + 100,
-                });
-            }
-            let RouteOutcome::Chosen(route) = resolve_with(
-                Role::Reviewer,
-                Difficulty::Simple,
-                &[reading(
-                    AccountKind::CodexPlan,
-                    Some(used),
-                    Some(now + 100),
-                    None,
-                )],
-                &marks,
-                ApiHeadroom::default(),
-                now,
-                (StepId::configured, codex, openai),
-            ) else {
-                panic!()
-            };
-            assert_eq!(route.step, expected);
-            if !codex {
-                assert!(
-                    route
-                        .reason
-                        .contains("disabled by CODEX_PLAN_ROUTING_ENABLED")
-                );
+            if expected == StepId::ReviewerClaudeApi {
+                assert_eq!(route.model, MODEL_HAIKU);
+                assert_eq!(route.effort, ROLE_REVIEWER_HAIKU_EFFORT);
+                assert_eq!(route.account, AccountKind::ClaudeApi);
+                assert!(route.reason.contains("fall back to Haiku"));
             }
         }
     }
@@ -1599,36 +1505,28 @@ mod provider_cap_tests {
             (
                 ProviderGroup::CodexPlan,
                 Role::Implementer,
-                StepId::ImplementerClaude,
+                Some(StepId::ImplementerClaude),
             ),
             (
                 ProviderGroup::ClaudePlanA,
                 Role::Implementer,
-                StepId::ImplementerClaude,
+                Some(StepId::ImplementerClaude),
             ),
-            (
-                ProviderGroup::ClaudePlanB,
-                Role::Implementer,
-                StepId::ImplementerDeepSeek,
-            ),
+            (ProviderGroup::ClaudePlanB, Role::Implementer, None),
             (
                 ProviderGroup::LunaApi,
                 Role::Reviewer,
-                StepId::ReviewerClaudeApi,
+                Some(StepId::ReviewerClaudeApi),
             ),
             (
                 ProviderGroup::HaikuApiA,
                 Role::Reviewer,
-                StepId::ReviewerClaudeApi,
+                Some(StepId::ReviewerClaudeApi),
             ),
-            (
-                ProviderGroup::HaikuApiB,
-                Role::Reviewer,
-                StepId::ReviewerDeepSeek,
-            ),
+            (ProviderGroup::HaikuApiB, Role::Reviewer, None),
         ] {
             counts.open[group as usize] = group.cap();
-            let RouteOutcome::Chosen(route) = resolve_with_groups(
+            let outcome = resolve_with_groups(
                 role,
                 Difficulty::Simple,
                 &[],
@@ -1636,17 +1534,24 @@ mod provider_cap_tests {
                 ApiHeadroom::default(),
                 1,
                 counts,
-            ) else {
-                panic!()
-            };
-            assert_eq!(route.step, expected);
-            if group == ProviderGroup::HaikuApiB {
-                assert!(route.reason.contains("Haiku API account A"));
-                assert!(route.reason.contains("Haiku API account B"));
-                assert!(!route.reason.contains("marked exhausted"));
+            );
+            match (outcome, expected) {
+                (RouteOutcome::Chosen(route), Some(step)) => assert_eq!(route.step, step),
+                (RouteOutcome::Exhausted(rejections), None) => {
+                    if group == ProviderGroup::HaikuApiB {
+                        let reasons = rejections
+                            .iter()
+                            .map(|r| r.reason.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        assert!(reasons.contains("Haiku API account A"));
+                        assert!(reasons.contains("Haiku API account B"));
+                        assert!(!reasons.contains("marked exhausted"));
+                    }
+                }
+                other => panic!("{group:?}: {other:?}"),
             }
         }
-        counts.open[ProviderGroup::DsfApi as usize] = MAX_OPEN_DSF_API_AGENTS;
         for role in [Role::Implementer, Role::Reviewer, Role::Planner] {
             let RouteOutcome::Exhausted(reasons) = resolve_with_groups(
                 role,

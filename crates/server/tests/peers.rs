@@ -1201,7 +1201,7 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
         .unwrap();
     assert_eq!(stored.account_key.as_deref(), Some("codex-plan"));
 
-    // A retry uses the stored route even after the allowances would choose DeepSeek.
+    // A retry uses the stored route even after the allowances would choose Sonnet.
     store
         .record_event(
             "caller",
@@ -1256,41 +1256,21 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
     .await;
     assert_eq!(nested["result"]["isError"], true);
 
-    for index in 2..=boblm_tuning::MAX_OPEN_DSF_API_AGENTS + 1 {
-        let id = format!("00000000-0000-4000-8000-{:012}", 100 + index);
-        let reply = tool_value(
-            &call(
-                &router,
-                token,
-                "caller",
-                "spawn_subagent",
-                serde_json::json!({"title":"Spawned chat","requestId":id,"message":format!("work {index}"),"role":"implementer","difficulty":"hard"}),
-            )
-            .await,
-        );
-        assert_eq!(
-            reply["routing"]["model"],
-            "deepseek-ai/DeepSeek-V4.1-Flash-1017"
-        );
-        assert_eq!(reply["routing"]["step"], "implementer-deepseek");
-        assert_eq!(reply["openSubagents"].as_array().unwrap().len(), index);
-    }
-    let over = call(
+    // With the Codex plan exhausted and no usable Claude plan account, the spawn is refused
+    // with one reason per remaining step. There is no DeepSeek step.
+    let refusal = call(
         &router,
         token,
         "caller",
         "spawn_subagent",
-        serde_json::json!({"title":"Spawned chat","requestId":"00000000-0000-4000-8000-000000000199","message":"too many","role":"implementer","difficulty":"simple"}),
+        serde_json::json!({"title":"Spawned chat","requestId":"00000000-0000-4000-8000-000000000199","message":"too many","role":"implementer","difficulty":"hard"}),
     )
     .await;
-    assert_eq!(over["result"]["isError"], true);
-    let text = over["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("The DSF API group has"), "{text}");
-    assert_eq!(
-        text.matches(boblm_tuning::CAP_ADVICE).count(),
-        1,
-        "the advice is added once to the whole refusal: {text}"
-    );
+    assert_eq!(refusal["result"]["isError"], true);
+    let text = refusal["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("The Codex plan weekly allowance"), "{text}");
+    assert!(text.contains("Claude plan account A"), "{text}");
+    assert!(!text.contains("DeepSeek"), "{text}");
     app.shutdown().await.unwrap();
 }
 
@@ -2203,10 +2183,13 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
     );
     let fallback = routes
         .iter()
-        .find(|route| route["routing"]["step"] == "reviewer-codex-plan")
+        .find(|route| route["routing"]["step"] == "reviewer-claude-api")
         .unwrap();
-    assert_eq!(fallback["routing"]["model"], boblm_tuning::MODEL_GPT_6_LUNA);
-    assert_eq!(fallback["routing"]["effort"], "xhigh");
+    assert_eq!(fallback["routing"]["model"], boblm_tuning::MODEL_HAIKU);
+    assert_eq!(
+        fallback["routing"]["effort"],
+        boblm_tuning::ROLE_REVIEWER_HAIKU_EFFORT
+    );
     let saved = store
         .reader()
         .unwrap()
@@ -2217,7 +2200,7 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
         .unwrap();
     assert_eq!(
         saved.account_key.as_deref(),
-        Some(boblm_tuning::CODEX_ACCOUNT_KEY_PLAN)
+        Some(boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A)
     );
     assert!(
         fallback["routing"]["reason"]

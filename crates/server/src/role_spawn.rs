@@ -123,7 +123,6 @@ pub fn resolve_route(
             account,
             weekly_used_percent: usage.weekly.as_ref().map(|weekly| weekly.used_percent),
             weekly_resets_at: usage.weekly.as_ref().and_then(|weekly| weekly.resets_at),
-            credits_balance: usage.credits.as_ref().and_then(|credits| credits.balance),
         });
     }
     let now_ms = unix_millis();
@@ -167,7 +166,6 @@ pub fn resolve_route(
             .and_then(|account| account.used_percent)
             .or_else(|| plan.is_none().then_some(100.0)),
         weekly_resets_at: plan.and_then(|account| account.resets_at),
-        credits_balance: None,
     });
     let api = crate::claude_account::choose_api_from(store, enabled.api, now_ms / 1000)?;
     counts.unavailable_api = [api.is_none(); 2];

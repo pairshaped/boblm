@@ -44,8 +44,8 @@ selection and allowance cutoff. Explicit model spawns filter full accounts and
 retain their allowance fallback when every plan is exhausted. Owner account
 selection remains unrestricted.
 Haiku API reviewers choose the first enabled API account with room and credit
-that has no active exhaustion mark, in configuration order. They fall through to
-DeepSeek when no enabled API account is available. Unknown credit balances are allowed.
+that has no active exhaustion mark, in configuration order. The reviewer
+spawn is refused when no enabled API account is available. Unknown credit balances are allowed.
 Quota or billing failures mark the individual API account until the configured
 monthly credit grant day, the 27th UTC (`ANTHROPIC_API_CREDIT_RESET_DAY`). This is
 account A's credit grant day, independent of billing. B shares it until the owner

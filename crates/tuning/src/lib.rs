@@ -279,10 +279,8 @@ pub const ROLE_IMPLEMENTER_HARD_EFFORT: &str = "high";
 pub const ROLE_IMPLEMENTER_SIMPLE_EFFORT: &str = "medium";
 /// Fixed effort for Opus planning and hard design questions.
 pub const ROLE_PLANNER_EFFORT: &str = "high";
-/// Effort for the DeepSeek reviewer fallback.
-pub const ROLE_REVIEWER_DEEPSEEK_EFFORT: &str = "high";
 /// Effort for Haiku reviews on the Claude Platform API credit.
-pub const ROLE_REVIEWER_HAIKU_EFFORT: &str = "high";
+pub const ROLE_REVIEWER_HAIKU_EFFORT: &str = "xhigh";
 /// Effort for the Luna reviewer on the OpenAI API credit.
 pub const ROLE_REVIEWER_LUNA_EFFORT: &str = "xhigh";
 /// Whether role subagent tools are exposed. The cutover set this to true.
@@ -306,7 +304,7 @@ pub fn provider_group(
     }
 }
 
-/// Model ID for DeepSeek V4.1 Flash 1017, used by Pi and the implementer fallback.
+/// Model ID for DeepSeek V4.1 Flash 1017, used by Pi for explicit-model chats.
 pub const MODEL_DEEPSEEK_V41_FLASH: &str = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
 /// Model ID for GPT-6.1 Sol, used by the Codex routing steps.
 pub const MODEL_GPT_6_1_SOL: &str = "gpt-6.1-sol";
