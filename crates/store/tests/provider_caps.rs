@@ -161,6 +161,11 @@ fn provider_caps_span_roots_include_owner_chats_and_preserve_retries() {
             .to_string();
         assert!(error.contains(&format!("{cap} of {cap}")), "{error}");
         assert!(error.contains("owner chats"), "{error}");
+        assert_eq!(
+            error.matches(boblm_tuning::CAP_ADVICE).count(),
+            1,
+            "a refusal carries the advice once: {error}"
+        );
         store.set_archived("child0", true).unwrap();
         store
             .spawn_peer(request(

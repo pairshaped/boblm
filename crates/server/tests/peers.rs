@@ -1284,6 +1284,13 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
     )
     .await;
     assert_eq!(over["result"]["isError"], true);
+    let text = over["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("The DSF API group has"), "{text}");
+    assert_eq!(
+        text.matches(boblm_tuning::CAP_ADVICE).count(),
+        1,
+        "the advice is added once to the whole refusal: {text}"
+    );
     app.shutdown().await.unwrap();
 }
 

@@ -358,6 +358,14 @@ impl Default for ProviderCounts {
     }
 }
 
+/// Added once to a refusal caused by a full provider cap, so the agent knows how to free a slot.
+pub const CAP_ADVICE: &str = "To free a slot, use list_peers and inspect_peer to find chats that have sat idle for a long time, and subagents that have stopped responding and may have fallen over (a failed or stuck turn, no recent events). If one's work is finished, can be resumed later, or is lost to a failure, save any progress worth keeping to durable storage first (a file in the repository, a note or a tracker item), then archive it with archive_peer. Archiving stops a chat, so never archive one that is still working normally, and use ask to check with the owner when you are not sure.";
+
+/// Whether a step rejection came from a full provider cap rather than credit or allowance.
+pub fn is_cap_reason(reason: &str) -> bool {
+    reason.contains(" open across ")
+}
+
 impl ProviderCounts {
     pub fn add(&mut self, group: ProviderGroup) {
         self.open[group as usize] += 1;
@@ -371,15 +379,24 @@ impl ProviderCounts {
 
     pub fn reviewer_rejection(self, group: ProviderGroup) -> Option<String> {
         let count = self.reviewers[group as usize];
-        (count >= MAX_OPEN_REVIEWERS_PER_PROVIDER).then(|| format!(
-            "{} already has {count} of {} reviewers open across every chat. Archive a finished reviewer to free a slot.", group.label(), MAX_OPEN_REVIEWERS_PER_PROVIDER
-        ))
+        (count >= MAX_OPEN_REVIEWERS_PER_PROVIDER).then(|| {
+            format!(
+                "{} already has {count} of {} reviewers open across every chat.",
+                group.label(),
+                MAX_OPEN_REVIEWERS_PER_PROVIDER
+            )
+        })
     }
 
     pub fn rejection(self, group: ProviderGroup) -> Option<String> {
         let count = self.count(group);
         let cap = group.cap();
-        (count >= cap).then(|| format!("{} has {count} of {cap} chats open across all chats, counting owner chats. Archive a finished chat to free a slot.", group.label()))
+        (count >= cap).then(|| {
+            format!(
+                "{} has {count} of {cap} chats open across all chats, counting owner chats.",
+                group.label()
+            )
+        })
     }
 
     pub fn spawn_rejection(self, group: ProviderGroup, reviewer: bool) -> Option<String> {
@@ -1643,10 +1660,12 @@ mod provider_cap_tests {
                 panic!()
             };
             assert_eq!(reasons.len(), steps(role).len());
+            assert!(reasons.iter().all(|reason| is_cap_reason(&reason.reason)));
             assert!(
                 reasons
                     .iter()
-                    .all(|reason| reason.reason.contains("Archive a finished chat"))
+                    .all(|reason| !reason.reason.contains(CAP_ADVICE)),
+                "the advice is added once to the final error, not to each step"
             );
         }
     }

@@ -122,7 +122,10 @@ impl crate::Store {
             if let Some(reason) =
                 counts.spawn_rejection(group, request.role.as_deref() == Some("reviewer"))
             {
-                return Err(crate::Error::Subagent(reason));
+                return Err(crate::Error::Subagent(format!(
+                    "{reason} {}",
+                    boblm_tuning::CAP_ADVICE
+                )));
             }
         }
         crate::sessions::insert_with_parent(

@@ -223,7 +223,18 @@ pub fn resolve_route(
                     "No planner model is available until the Claude reset at {reset}. {reasons}"
                 ))
             } else {
-                Err(format!("No {} step is available: {reasons}", role.label()))
+                let advice = if rejections
+                    .iter()
+                    .any(|rejection| boblm_tuning::is_cap_reason(&rejection.reason))
+                {
+                    format!(" {}", boblm_tuning::CAP_ADVICE)
+                } else {
+                    String::new()
+                };
+                Err(format!(
+                    "No {} step is available: {reasons}{advice}",
+                    role.label()
+                ))
             }
         }
     }
