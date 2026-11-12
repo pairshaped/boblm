@@ -27,104 +27,7 @@ pub(crate) fn enqueue(
         .pop()
         .ok_or(rusqlite::Error::QueryReturnedNoRows.into())
 }
-/// Application events use the same durable path as explicit agent notices.
-pub(crate) fn automatic(
-    tx: &rusqlite::Transaction<'_>,
-    session: &str,
-    kind: &str,
-    payload: &serde_json::Value,
-    now: i64,
-) -> Result<()> {
-    let notice = match kind {
-        "questions_changed" if payload["question_id"].is_string() => Some((
-            "questions",
-            "A question needs your answer",
-            payload["question"]
-                .as_str()
-                .unwrap_or("Open the Questions drawer to answer."),
-            payload["question_id"].as_str(),
-        )),
-        "secret_requested" => Some((
-            "questions",
-            "A credential is requested",
-            "Open this chat to submit it securely.",
-            None,
-        )),
-        "driver_error" | "model_error" | "delivery_timeout" => Some((
-            "failures",
-            "A chat needs attention",
-            "Open the chat to see what failed and what to do next.",
-            None,
-        )),
-        "agent_event" if payload["type"] == "result" && payload["is_error"] == true => Some((
-            "failures",
-            "An agent turn failed",
-            "Open the chat to see the failure.",
-            None,
-        )),
-        "state_summary"
-            if payload["running"] == true
-                && payload["turnActive"] == false
-                && payload["stopping"] == false
-                && payload["archived"] == false
-                && payload["queued"] == 0
-                && payload["dispatching"] == 0
-                && payload["uncertain"] == 0 =>
-        {
-            let previous = sql::previous_status(tx, sql::PreviousStatusParams { session })?
-                .pop()
-                .map(|s| serde_json::from_str::<serde_json::Value>(&s))
-                .transpose()
-                .map_err(std::io::Error::other)?;
-            let end = sql::turn_end(tx, sql::TurnEndParams { session })?.pop();
-            let ended_successfully = end
-                .filter(|e| e.kind == "agent_event")
-                .map(|e| serde_json::from_str::<serde_json::Value>(&e.payload))
-                .transpose()
-                .map_err(std::io::Error::other)?
-                .is_some_and(|e| e["is_error"] != true);
-            if previous.is_some_and(|p| p["turnActive"] == true) && ended_successfully {
-                Some((
-                    "completion",
-                    "An agent turn finished",
-                    "Open the chat to read the reply.",
-                    None,
-                ))
-            } else {
-                None
-            }
-        }
-        _ => None,
-    };
-    if let Some((category, title, message, question_id)) = notice {
-        enqueue(
-            tx,
-            NewNotification {
-                id: &format!("event:{}", uuid::Uuid::new_v4()),
-                session,
-                category,
-                title,
-                message: &message
-                    .chars()
-                    .take(boblm_tuning::MAX_NOTIFICATION_MESSAGE_CHARS)
-                    .collect::<String>(),
-                question_id,
-                state: "pending",
-                reason: "",
-                created_at: now,
-            },
-        )?;
-    }
-    Ok(())
-}
 impl Store {
-    pub fn notify(&self, new: NewNotification<'_>) -> Result<Notification> {
-        let mut conn = self.writer.lock().map_err(|_| Error::Poisoned)?;
-        let tx = conn.transaction()?;
-        let notice = enqueue(&tx, new)?;
-        tx.commit()?;
-        Ok(notice)
-    }
     pub fn settle_notification(&self, id: &str, state: &str, reason: &str) -> Result<()> {
         let mut conn = self.writer.lock().map_err(|_| Error::Poisoned)?;
         sql::settle(&mut *conn, sql::SettleParams { id, state, reason })?;
@@ -190,22 +93,28 @@ impl crate::Reader {
 mod tests {
     use super::*;
     use serde_json::json;
+
     #[test]
-    fn completion_requires_an_idle_acknowledged_turn_and_stops_do_not_notify() {
+    fn notification_only_new_questions_and_credentials_enqueue_and_retries_deduplicate() {
         let temp = tempfile::tempdir().unwrap();
-        let store = Store::open(temp.path().join("auto.sqlite")).unwrap();
+        let store = Store::open(temp.path().join("notifications.sqlite")).unwrap();
         store.create_session("s", "/tmp", 1).unwrap();
-        let active = json!({"running":true,"turnActive":true,"stopping":false,"archived":false,"queued":0,"dispatching":0,"uncertain":0});
-        let mut idle = active.clone();
-        idle["turnActive"] = false.into();
-        store.publish_summary("s", active.clone()).unwrap();
+        store.ask("q", "s", "Which way?", &[], 2).unwrap();
+        store.ask("q", "s", "Which way?", &[], 3).unwrap();
+        assert_eq!(
+            store.reader().unwrap().pending_notifications().unwrap(),
+            vec!["question:q"]
+        );
+        let notice = store
+            .reader()
+            .unwrap()
+            .notification("question:q")
+            .unwrap()
+            .unwrap();
+        assert_eq!(notice.question_id.as_deref(), Some("q"));
+        assert_eq!(notice.message, "Which way?");
         store
-            .record_event(
-                "s",
-                "agent_event",
-                json!({"type":"result","subtype":"success","is_error":false}),
-                2,
-            )
+            .update_question("q", "r", "s", "Revised?", &[], 4)
             .unwrap();
         assert!(
             store
@@ -215,84 +124,77 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        let mut waiting = idle.clone();
-        waiting["dispatching"] = 1.into();
-        store.publish_summary("s", waiting).unwrap();
+        store.answer_question("r", "s", "Yes", 5).unwrap();
+        store.delete_question("r", "s", 6).unwrap();
+        store.ask("deferred", "s", "Later?", &[], 7).unwrap();
+        store
+            .settle_notification("question:deferred", "sent", "")
+            .unwrap();
+        store.discuss_question_later("deferred", "s", 8).unwrap();
+        for _ in 0..2 {
+            store
+                .create_secret_request(
+                    crate::NewSecretRequest {
+                        id: "credential",
+                        session: "s",
+                        file: "/private/file",
+                        key: &["private-key".into()],
+                        expires_at: 100,
+                        created_at: 8,
+                    },
+                    3,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            store.reader().unwrap().pending_notifications().unwrap(),
+            vec!["secret:credential"]
+        );
+        let notice = store
+            .reader()
+            .unwrap()
+            .notification("secret:credential")
+            .unwrap()
+            .unwrap();
+        assert_eq!(notice.category, "questions");
+        assert_eq!(notice.title, "A credential is requested");
+        assert_eq!(notice.message, "Open this chat to submit it securely.");
+        assert!(notice.question_id.is_none());
+        store
+            .settle_notification("secret:credential", "sent", "")
+            .unwrap();
+        for (kind, payload) in [
+            (
+                "questions_changed",
+                json!({"question_id":"fake","question":"No push"}),
+            ),
+            ("secret_requested", json!({})),
+            ("driver_error", json!({})),
+            ("model_error", json!({})),
+            ("delivery_timeout", json!({})),
+            ("agent_event", json!({"type":"result","is_error":true})),
+        ] {
+            store.record_event("s", kind, payload, 9).unwrap();
+        }
+        store
+            .publish_summary("s", json!({"running":true,"turnActive":true}))
+            .unwrap();
+        store
+            .record_event(
+                "s",
+                "agent_event",
+                json!({"type":"result","is_error":false}),
+                10,
+            )
+            .unwrap();
+        store.publish_summary("s", json!({"running":true,"turnActive":false,"stopping":false,"archived":false,"queued":0,"dispatching":0,"uncertain":0})).unwrap();
         assert!(
             store
                 .reader()
                 .unwrap()
                 .pending_notifications()
                 .unwrap()
-                .is_empty(),
-            "a steer is still waiting on acknowledgment"
+                .is_empty()
         );
-        store.publish_summary("s", active.clone()).unwrap();
-        store.publish_summary("s", idle.clone()).unwrap();
-        let pending = store.reader().unwrap().pending_notifications().unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(
-            store
-                .reader()
-                .unwrap()
-                .notification(&pending[0])
-                .unwrap()
-                .unwrap()
-                .category,
-            "completion"
-        );
-        store.publish_summary("s", active.clone()).unwrap();
-        store
-            .record_event("s", "session_stopped", json!({}), 3)
-            .unwrap();
-        let mut stopped = idle.clone();
-        stopped["running"] = false.into();
-        store.publish_summary("s", stopped).unwrap();
-        assert_eq!(
-            store
-                .reader()
-                .unwrap()
-                .pending_notifications()
-                .unwrap()
-                .len(),
-            1
-        );
-        store.publish_summary("s", active).unwrap();
-        store
-            .record_event(
-                "s",
-                "agent_event",
-                json!({"type":"result","is_error":true}),
-                4,
-            )
-            .unwrap();
-        store.publish_summary("s", idle).unwrap();
-        assert_eq!(
-            store
-                .reader()
-                .unwrap()
-                .pending_notifications()
-                .unwrap()
-                .len(),
-            2,
-            "a failure does not also get a completion notice"
-        );
-        store
-            .record_event(
-                "s",
-                "secret_requested",
-                json!({"file":"private-file","key":["private-key"]}),
-                5,
-            )
-            .unwrap();
-        let records = store
-            .reader()
-            .unwrap()
-            .pending_notifications()
-            .unwrap()
-            .into_iter()
-            .map(|id| store.reader().unwrap().notification(&id).unwrap().unwrap())
-            .collect::<Vec<_>>();
-        assert!(records.iter().all(|n| !n.message.contains("private-")));
     }
 }

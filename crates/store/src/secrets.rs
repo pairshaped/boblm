@@ -132,6 +132,20 @@ impl Store {
             json!({"request_id": new.id, "file": new.file, "key": new.key, "expires_at": new.expires_at}),
             new.created_at,
         )?;
+        crate::notifications::enqueue(
+            &tx,
+            crate::NewNotification {
+                id: &format!("secret:{}", new.id),
+                session: new.session,
+                category: "questions",
+                title: "A credential is requested",
+                message: "Open this chat to submit it securely.",
+                question_id: None,
+                state: "pending",
+                reason: "",
+                created_at: new.created_at,
+            },
+        )?;
         let created = sql::lookup(&tx, sql::LookupParams { id: new.id })?
             .pop()
             .ok_or(rusqlite::Error::QueryReturnedNoRows)?;

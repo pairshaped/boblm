@@ -45,6 +45,23 @@ impl Store {
             serde_json::json!({"question_id": id, "question": question}),
             now,
         )?;
+        crate::notifications::enqueue(
+            &tx,
+            crate::NewNotification {
+                id: &format!("question:{id}"),
+                session,
+                category: "questions",
+                title: "A question needs your answer",
+                message: &question
+                    .chars()
+                    .take(boblm_tuning::MAX_NOTIFICATION_MESSAGE_CHARS)
+                    .collect::<String>(),
+                question_id: Some(id),
+                state: "pending",
+                reason: "",
+                created_at: now,
+            },
+        )?;
         let question = sql::lookup(&tx, sql::LookupParams { id })?
             .pop()
             .ok_or(rusqlite::Error::QueryReturnedNoRows)?;

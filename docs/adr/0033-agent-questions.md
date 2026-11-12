@@ -2,7 +2,8 @@
 
 The `ask` MCP tool records a question in the caller's own chat and returns immediately. Agents supply
 a fresh question UUID, text, and optional suggested answers. An identical retry returns the existing
-question. Reusing an ID for different text, choices or a different chat fails. Credentials belong in
+question. Creating a question through `ask` can send a push notification; edits and owner
+decisions do not. Credential requests can also notify (ADR 0034). Reusing an ID for different text, choices or a different chat fails. Credentials belong in
 `request_sops_secret`; question text and answers are ordinary persisted chat data.
 
 Agents can revise an unanswered prompt with `update_question` or remove a resolved

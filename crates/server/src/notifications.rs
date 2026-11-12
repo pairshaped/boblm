@@ -5,7 +5,6 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use boblm_protocol::client::{
     ChatPresence, Empty, PushConfigReply, SubscribePush, UnsubscribePush,
 };
-use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Instant};
@@ -21,12 +20,15 @@ pub struct PushConfig {
     /// A mailto: contact or public HTTPS URL for VAPID.
     pub subject: String,
     #[serde(default = "yes")]
+    /// Deprecated compatibility setting. Accepted but ignored.
     pub agent_notices: bool,
     #[serde(default = "yes")]
     pub questions: bool,
     #[serde(default)]
+    /// Deprecated compatibility setting. Accepted but ignored.
     pub completion: bool,
     #[serde(default = "yes")]
+    /// Deprecated compatibility setting. Accepted but ignored.
     pub failures: bool,
 }
 fn yes() -> bool {
@@ -34,22 +36,8 @@ fn yes() -> bool {
 }
 impl PushConfig {
     fn allows(&self, category: &str) -> bool {
-        match category {
-            "agent" => self.agent_notices,
-            "questions" => self.questions,
-            "completion" => self.completion,
-            "failures" => self.failures,
-            _ => false,
-        }
+        category == "questions" && self.questions
     }
-}
-#[derive(Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct NotifyArgs {
-    /// Fresh UUID. Reuse only for an identical explicit retry.
-    pub notification_id: String,
-    pub title: String,
-    pub message: String,
 }
 #[async_trait::async_trait]
 trait PushSender: Send + Sync {
@@ -230,65 +218,6 @@ impl App {
         state.sender = Some(sender);
         state.config = Some(config);
         Ok(())
-    }
-    pub async fn notify(
-        &self,
-        caller: &str,
-        args: NotifyArgs,
-    ) -> Result<serde_json::Value, String> {
-        let id = boblm_runner::canonical_uuid(&args.notification_id).map_err(|_| {
-            "notificationId must be a fresh UUID. Reuse it only for an identical retry.".to_string()
-        })?;
-        if args.title.trim().is_empty()
-            || args.title.chars().count() > boblm_tuning::MAX_NOTIFICATION_TITLE_CHARS
-            || args.message.trim().is_empty()
-            || args.message.chars().count() > boblm_tuning::MAX_NOTIFICATION_MESSAGE_CHARS
-        {
-            return Err(format!(
-                "A notification needs a title of 1 to {} characters and a message of 1 to {} characters. Shorten it and try again.",
-                boblm_tuning::MAX_NOTIFICATION_TITLE_CHARS,
-                boblm_tuning::MAX_NOTIFICATION_MESSAGE_CHARS
-            ));
-        }
-        let payload_size = serde_json::to_vec(&serde_json::json!({"id":id,"sessionId":caller,"questionId":null,"title":args.title,"body":args.message})).map_err(|e|format!("Could not encode the notification: {e}. Shorten its title and message."))?.len();
-        if payload_size > boblm_tuning::MAX_NOTIFICATION_PAYLOAD_BYTES {
-            return Err(format!(
-                "The encoded notification is {payload_size} bytes, over the {} byte push limit. Shorten the title or message and try again.",
-                boblm_tuning::MAX_NOTIFICATION_PAYLOAD_BYTES
-            ));
-        }
-        self.handle(caller).await.map_err(|e| e.to_string())?;
-        let reason = self
-            .notifications
-            .lock()
-            .map_err(|_| lock_error().to_string())?
-            .suppress(&[caller], "agent");
-        let (store, session) = (self.store.clone(), caller.to_owned());
-        let notice = tokio::task::spawn_blocking(move || {
-            store.notify(boblm_store::NewNotification {
-                id: &id,
-                session: &session,
-                category: "agent",
-                title: &args.title,
-                message: &args.message,
-                question_id: None,
-                state: if reason.is_some() {
-                    "suppressed"
-                } else {
-                    "pending"
-                },
-                reason: reason.unwrap_or(""),
-                created_at: crate::schedule::now_ms(),
-            })
-        })
-        .await
-        .map_err(|e| {
-            format!("Could not save the notification: {e}. Retry with the same notificationId.")
-        })?
-        .map_err(|e| e.to_string())?;
-        Ok(
-            serde_json::json!({"notificationId":notice.id,"accepted":notice.state!="suppressed","suppressed":notice.state=="suppressed","reason":notice.reason,"state":notice.state}),
-        )
     }
     pub async fn deliver_notifications(&self) {
         if let Err(error) = self.drain_notifications().await {
@@ -516,11 +445,20 @@ mod tests {
             failures: true,
         }
     }
-    fn args(id: u8) -> NotifyArgs {
-        NotifyArgs {
-            notification_id: format!("10000000-0000-4000-8000-{id:012}"),
-            title: "Finished".into(),
-            message: "The long task finished.".into(),
+    fn ask(store: &boblm_store::Store, id: u8) -> String {
+        let question = format!("10000000-0000-4000-8000-{id:012}");
+        store.ask(&question, "s", "Which way?", &[], 1).unwrap();
+        format!("question:{question}")
+    }
+    #[test]
+    fn legacy_notification_config_parses_but_only_questions_are_allowed() {
+        let config: PushConfig = serde_json::from_value(serde_json::json!({
+            "privateKeyFile": "/unused", "subject": "mailto:test@example.com",
+            "agentNotices": true, "questions": false, "completion": true, "failures": true
+        }))
+        .unwrap();
+        for category in ["agent", "completion", "failures", "questions"] {
+            assert!(!config.allows(category));
         }
     }
     async fn fixture() -> (
@@ -563,21 +501,32 @@ mod tests {
     #[tokio::test]
     async fn notification_retries_are_durable_deduplicated_and_never_start_an_agent() {
         let (_temp, _store, app, fake) = fixture().await;
-        assert_eq!(app.notify("s", args(1)).await.unwrap()["accepted"], true);
-        assert_eq!(app.notify("s", args(1)).await.unwrap()["accepted"], true);
-        let mut conflict = args(1);
-        conflict.message = "Other".into();
-        assert!(app.notify("s", conflict).await.is_err());
+        let id = ask(&_store, 1);
+        assert_eq!(ask(&_store, 1), id);
+        assert!(
+            _store
+                .ask("10000000-0000-4000-8000-000000000001", "s", "Other", &[], 1)
+                .is_err()
+        );
         app.drain_notifications().await.unwrap();
         app.drain_notifications().await.unwrap();
         assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
-        assert_eq!(app.notify("s", args(1)).await.unwrap()["state"], "sent");
+        assert_eq!(
+            _store
+                .reader()
+                .unwrap()
+                .notification(&id)
+                .unwrap()
+                .unwrap()
+                .state,
+            "sent"
+        );
         app.shutdown().await.unwrap();
     }
     #[tokio::test]
     async fn preferences_and_current_viewing_suppress_even_an_accepted_notice() {
         let (_temp, _store, app, fake) = fixture().await;
-        app.notify("s", args(2)).await.unwrap();
+        let id = ask(&_store, 2);
         app.notifications
             .lock()
             .unwrap()
@@ -585,21 +534,33 @@ mod tests {
             .insert("browser".into(), ("s".into(), Instant::now()));
         app.drain_notifications().await.unwrap();
         assert_eq!(
-            app.notify("s", args(2)).await.unwrap()["reason"],
+            _store
+                .reader()
+                .unwrap()
+                .notification(&id)
+                .unwrap()
+                .unwrap()
+                .reason,
             "viewing_chat"
         );
         app.notifications.lock().unwrap().viewing.clear();
-        app.notify("s", args(3)).await.unwrap();
+        let id = ask(&_store, 3);
         app.notifications
             .lock()
             .unwrap()
             .config
             .as_mut()
             .unwrap()
-            .agent_notices = false;
+            .questions = false;
         app.drain_notifications().await.unwrap();
         assert_eq!(
-            app.notify("s", args(3)).await.unwrap()["reason"],
+            _store
+                .reader()
+                .unwrap()
+                .notification(&id)
+                .unwrap()
+                .unwrap()
+                .reason,
             "disabled_by_config"
         );
         assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
@@ -608,10 +569,7 @@ mod tests {
     #[tokio::test]
     async fn a_crash_after_a_claim_never_replays_that_push_and_expired_devices_are_removed() {
         let (_temp, _store, app, fake) = fixture().await;
-        let id = app.notify("s", args(4)).await.unwrap()["notificationId"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let id = ask(&_store, 4);
         assert!(app.store.claim_push_delivery(&id, "device").unwrap());
         app.drain_notifications().await.unwrap();
         assert_eq!(fake.calls.load(Ordering::SeqCst), 0);
@@ -631,7 +589,7 @@ mod tests {
             payloads: std::sync::Mutex::new(Vec::new()),
         });
         app.notifications.lock().unwrap().sender = Some(expired.clone());
-        app.notify("s", args(5)).await.unwrap();
+        ask(&_store, 5);
         app.drain_notifications().await.unwrap();
         assert_eq!(expired.calls.load(Ordering::SeqCst), 1);
         assert!(

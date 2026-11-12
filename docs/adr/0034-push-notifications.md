@@ -6,20 +6,24 @@ On iPhone, the owner installs the app on the Home Screen and enables notificatio
 the sidebar. Permission is requested only after that action. Locking the app unsubscribes that
 browser; disabling notifications does the same without locking it.
 
-The MCP surface has no tool for requesting ad hoc push notifications. Notification
-categories are produced by server events and follow the owner's preferences.
+Only a new question created through the `ask` MCP tool or a credential request through
+`request_sops_secret` can produce a push notification.
+There is no ad hoc notification tool. Updating, answering, deferring or deleting questions,
+failures and completed turns do not push.
 
-Questions, credential requests, failures, and completed turns use the same SQLite notification outbox.
-A completion means an acknowledged turn became idle with no queued, dispatching or uncertain input.
-Stopping and failing a turn don't also produce completion notices. Each category respects the owner's
-config. With no push config, notices are suppressed. With push configured, agent notices, questions
-(including credential requests), and failures default on; completion defaults off.
+Question creation and its notification share one SQLite transaction. The durable notice ID
+is `question:<question id>`, so identical retries cannot produce another notice.
+Credential requests enqueue in their creation transaction with stable `secret:<request id>`
+notice IDs, so retries cannot duplicate them. They use the same `questions` category and
+config bool. Pending notices for retired questions are suppressed. With no push config, notices are
+suppressed. The `questions` config bool defaults on. The sidebar bell subscribes or
+unsubscribes the current browser, keeping on/off control on each device.
 
 A visible, focused browser renews a short presence lease for the viewed chat. That suppresses pushes
 for the chat across the owner's devices. The server checks presence and preferences again before
 sending. Expired leases don't suppress anything. The worker always displays received pushes because
 Safari requires visible notifications. Clicking a notification opens its chat and, for a question,
-opens the drawer and focuses the question.
+opens the Questions modal and focuses the question through `?question=<id>`.
 
 Subscriptions require the owner's bearer token. The server accepts HTTPS endpoints on known browser
 push services and validates the encryption keys before storing them. Payloads are encrypted with
@@ -51,13 +55,13 @@ Add `notifications` to the existing server JSON, using an absolute file path and
   "notifications": {
     "privateKeyFile": "/home/user/.config/boblm/push-key.pem",
     "subject": "mailto:you@example.com",
-    "agentNotices": true,
-    "questions": true,
-    "completion": false,
-    "failures": true
+    "questions": true
   }
 }
 ```
+
+The legacy `agentNotices`, `completion` and `failures` keys remain accepted as deprecated,
+ignored no-ops, so existing configuration files still parse.
 
 Keep the key stable: subscriptions are tied to its public key. After rotating it, disable and reenable
 notifications on each device. Configuration takes effect after the next authorized server deployment.

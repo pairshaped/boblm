@@ -26,12 +26,3 @@ INSERT OR IGNORE INTO push_deliveries (notification, subscription, state) VALUES
 
 -- func: finish_delivery
 UPDATE push_deliveries SET state = @state WHERE notification = @notification AND subscription = @subscription;
-
--- func: previous_status
-SELECT payload FROM events WHERE session = @session AND kind = 'state_summary' ORDER BY seq DESC LIMIT 1 OFFSET 1;
-
--- func: turn_end
-SELECT kind, payload FROM events WHERE session = @session AND (
- kind IN ('session_stopped', 'driver_error', 'model_error', 'delivery_timeout') OR
- (kind = 'agent_event' AND json_extract(payload, '$.type') = 'result')
-) ORDER BY seq DESC LIMIT 1;

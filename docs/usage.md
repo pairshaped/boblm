@@ -172,7 +172,9 @@ If the bell is missing, check that you're using HTTPS and a supported browser.
 On iPhone, launch from the Home Screen. The server also needs push configured;
 see [the push configuration details](adr/0034-push-notifications.md).
 
-To test delivery, switch to another app before asking an agent to notify you.
+New questions from the agent’s `ask` tool and credential requests send notifications.
+Edits, failures and completed turns do not. To test delivery, switch to another app
+before asking an agent to create a question through `ask`.
 BobLM suppresses notifications for a chat you're already viewing in a focused
 app window.
 
