@@ -113,6 +113,15 @@ struct ArchiveArgs {
 }
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct GradeArgs {
+    session_id_prefix: String,
+    /// Exactly `good`, `ok` or `poor`.
+    rating: String,
+    /// Optional plain-text note of at most 500 characters.
+    note: Option<String>,
+}
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct DeleteChatArgs {
     session_id_prefix: String,
     /// Fresh UUID for this deletion. Reuse only for an identical explicit retry.
@@ -709,6 +718,31 @@ impl Peers {
             let session=self.resolve(&id).await?;
             self.app.archive_cascade(&session.id, true).await.map_err(|e|e.to_string())?;
             Ok(serde_json::json!({"sessionId":session.id,"archived":true,"historyRetained":true}))
+        }.await)
+    }
+    #[tool(
+        description = "Optionally grade a subagent you started: rating good, ok or poor, with an optional short note. Grade from the result you already have; do not re-read code or re-verify findings just to grade, and skip when unsure. For an implementer give a quick gut rating only. Works on archived subagents; grading again overwrites. The reply carries no routing details."
+    )]
+    async fn grade_subagent(
+        &self,
+        Parameters(args): Parameters<GradeArgs>,
+        context: RequestContext<RoleServer>,
+    ) -> CallToolResult {
+        result(async {
+            if !self.app.subagent_grading_enabled() {
+                return Err("Subagent grading is turned off.".into());
+            }
+            let caller = caller(&context)?;
+            let session = self.resolve(&args.session_id_prefix).await?;
+            let store = self.app.store.clone();
+            let rating = args.rating.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                store.grade_subagent(&caller, &session.id, &rating, args.note.as_deref(), unix_ms())
+            })
+            .await
+            .map_err(|e| format!("BobLM could not save the grade because its task stopped: {e}. Try again."))?
+            .map_err(|e| e.to_string())?;
+            Ok(serde_json::json!({"sessionId": outcome.session_id, "rating": args.rating, "replaced": outcome.replaced}))
         }.await)
     }
     #[tool(

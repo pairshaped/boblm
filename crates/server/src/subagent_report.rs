@@ -38,6 +38,9 @@ fn truncate_utf8(text: &mut String, max: usize) {
     text.truncate(end);
 }
 
+const REVIEW_GRADE_HINT: &str =
+    "Optional: grade this review with grade_subagent (good, ok or poor).";
+
 fn report_content(
     child_id: &str,
     child_name: &str,
@@ -45,6 +48,7 @@ fn report_content(
     open: &[serde_json::Value],
     tpm_limited: bool,
     error: Option<(&str, &str)>,
+    grade_hint: bool,
 ) -> String {
     let label = if child_name.trim().is_empty() {
         child_id.to_owned()
@@ -95,8 +99,14 @@ fn report_content(
     } else {
         lines.join("\n")
     };
+    // Only a finished review carries the hint; it names no model or provider (ADR 0048).
+    let hint = if grade_hint && error.is_none() && !tpm_limited {
+        format!("\n\n{REVIEW_GRADE_HINT}")
+    } else {
+        String::new()
+    };
     let suffix = format!(
-        "\n\nOpen subagents:\n{open_text}\n\n{}",
+        "{hint}\n\nOpen subagents:\n{open_text}\n\n{}",
         role_spawn::ReplyTrailer::SubagentReport.text()
     );
     let mut body = if let Some((error, "subagent_runaway_limit")) = error {
@@ -121,7 +131,11 @@ fn report_content(
 }
 
 /// Report text and the optional assistant-text cursor used to suppress repeated results.
-fn build_report(store: &Store, report: &SubagentReport) -> Result<(String, Option<i64>), String> {
+fn build_report(
+    store: &Store,
+    report: &SubagentReport,
+    grading_enabled: bool,
+) -> Result<(String, Option<i64>), String> {
     let reader = store
         .reader()
         .map_err(|error| format!("Could not read the subagent report: {error}."))?;
@@ -152,6 +166,7 @@ fn build_report(store: &Store, report: &SubagentReport) -> Result<(String, Optio
                 &open,
                 false,
                 Some((error, &report.source_kind)),
+                false,
             ),
             None,
         ));
@@ -198,6 +213,7 @@ fn build_report(store: &Store, report: &SubagentReport) -> Result<(String, Optio
             &open,
             failed && tpm_error,
             None,
+            grading_enabled && child.role.as_deref() == Some("reviewer"),
         ),
         text_seq,
     ))
@@ -257,6 +273,7 @@ impl App {
             }
         }
 
+        let grading_enabled = self.subagent_grading_enabled();
         for report in reports.into_iter().filter(|report| {
             report.source_kind != "result" || newest[&report.child_session] == report.result_seq
         }) {
@@ -297,7 +314,7 @@ impl App {
             let store = self.store.clone();
             let report_for_build = report.clone();
             let (content, text_seq) = match tokio::task::spawn_blocking(move || {
-                let (content, text_seq) = build_report(&store, &report_for_build)?;
+                let (content, text_seq) = build_report(&store, &report_for_build, grading_enabled)?;
                 store
                     .remember_subagent_report_text_seq(
                         &report_for_build.child_session,
@@ -520,7 +537,7 @@ mod tests {
             .into_iter()
             .find(|r| r.source_kind == "subagent_runaway_limit")
             .unwrap();
-        let (content, text_seq) = build_report(&h.store, &report).unwrap();
+        let (content, text_seq) = build_report(&h.store, &report, false).unwrap();
         assert!(content.starts_with("Worker was paused after using "));
         assert!(content.contains("Decide whether it is still making real progress"));
         assert!(content.contains("a new round starts with a fresh limit"));
@@ -943,7 +960,7 @@ mod tests {
             .unwrap()
             .pop()
             .unwrap();
-        let (text, _) = build_report(&h.store, &report).unwrap();
+        let (text, _) = build_report(&h.store, &report, false).unwrap();
         assert!(
             text.contains(
                 "stopped because its model provider reached a tokens-per-minute rate limit"
@@ -974,7 +991,7 @@ mod tests {
             .unwrap()
             .pop()
             .unwrap();
-        let (text, _) = build_report(&h.store, &report).unwrap();
+        let (text, _) = build_report(&h.store, &report, false).unwrap();
         assert!(text.contains("finished. Its result follows"));
         assert!(!text.contains("tokens-per-minute rate limit"));
     }
@@ -1512,9 +1529,85 @@ mod tests {
     #[test]
     fn an_oversized_result_is_shortened_with_an_inspect_pointer() {
         let text = "x".repeat(boblm_tuning::MAX_MESSAGE_BYTES + 100);
-        let content = report_content("child", "Worker", &text, &[], false, None);
+        let content = report_content("child", "Worker", &text, &[], false, None, false);
         assert!(content.len() <= boblm_tuning::MAX_MESSAGE_BYTES);
         assert!(content.contains("inspect_peer"));
         assert!(content.contains("No reply is needed"));
+    }
+
+    const HINT: &str = "Optional: grade this review with grade_subagent (good, ok or poor).";
+
+    fn set_child_role(h: &Harness, role: &str) {
+        let db = rusqlite::Connection::open(h._temp.path().join("db.sqlite")).unwrap();
+        db.execute("UPDATE sessions SET role = ?1", [role]).unwrap();
+    }
+
+    fn pending_result(h: &Harness) -> boblm_store::SubagentReport {
+        h.result();
+        h.store
+            .reader()
+            .unwrap()
+            .pending_subagent_reports()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.source_kind == "result")
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn only_a_reviewer_result_carries_the_grading_hint_while_grading_is_on() {
+        for (role, expected) in [
+            ("reviewer", true),
+            ("implementer", false),
+            ("planner", false),
+        ] {
+            let h = Harness::new().await;
+            set_child_role(&h, role);
+            let report = pending_result(&h);
+            let (content, _) = build_report(&h.store, &report, true).unwrap();
+            assert_eq!(content.contains(HINT), expected, "{role}: {content}");
+            // Only reviewers are blind; the open list names the model of other roles.
+            for name in ["sonnet", "haiku", "luna", "openai", "claude", "codex"]
+                .into_iter()
+                .filter(|_| role == "reviewer")
+            {
+                assert!(
+                    !content.to_lowercase().contains(name),
+                    "{name} in {content}"
+                );
+            }
+        }
+        let h = Harness::new().await;
+        set_child_role(&h, "reviewer");
+        let report = pending_result(&h);
+        let (content, _) = build_report(&h.store, &report, false).unwrap();
+        assert!(!content.contains("grade_subagent"));
+    }
+
+    #[tokio::test]
+    async fn a_delivered_reviewer_report_has_the_hint_and_disabling_grading_removes_it() {
+        for enabled in [true, false] {
+            let mut h = Harness::new().await;
+            set_child_role(&h, "reviewer");
+            h.app.set_subagent_grading_enabled_for_tests(enabled);
+            h.result();
+            h.app.deliver_subagent_reports().await;
+            let (_, content, _) = h.inputs.recv().await.expect("parent input");
+            assert_eq!(content.contains(HINT), enabled, "{content}");
+        }
+    }
+
+    #[test]
+    fn error_reports_never_carry_the_grading_hint() {
+        let content = report_content(
+            "child",
+            "Worker",
+            "",
+            &[],
+            false,
+            Some(("The turn failed.", "driver_error")),
+            true,
+        );
+        assert!(!content.contains("grade_subagent"));
     }
 }

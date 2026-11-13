@@ -103,6 +103,7 @@ fn delete_one(tx: &rusqlite::Transaction<'_>, id: &str, actor: Option<&str>) -> 
     {
         return Err(Error::ChatDeletion("This chat is saving a credential. Wait for that operation to finish before deleting it.".into()));
     }
+    // `subagent_grades` is deliberately not purged: a grade outlives its chat (ADR 0048).
     sql::queue_uploads(tx, sql::QueueUploadsParams { id })?;
     sql::attachments(tx, sql::AttachmentsParams { id })?;
     sql::messages(tx, sql::MessagesParams { id })?;

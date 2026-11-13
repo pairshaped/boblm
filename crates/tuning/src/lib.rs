@@ -211,6 +211,8 @@ pub const MAX_CLAUDE_LINE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_DIRECTORY_ENTRIES: usize = 2000;
 /// Most events committed in one database transaction.
 pub const MAX_EVENT_BATCH: usize = 256;
+/// Longest note a parent may attach to a subagent grade, in characters.
+pub const MAX_GRADE_NOTE_CHARS: usize = 500;
 /// Longest reason a held queue shows beside Resume, in characters.
 pub const MAX_HELD_REASON_CHARS: usize = 500;
 /// Longest caption an agent may give a shown image, in characters.
@@ -521,6 +523,9 @@ pub const SSE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub const STOP_RESULT_DEADLINE: Duration = Duration::from_secs(30);
 /// Maximum parent links checked when authorizing a nested Codex subagent transcript.
 pub const SUBAGENT_ANCESTRY_LIMIT: usize = 16;
+/// Whether parents may grade subagents with `grade_subagent` and reviewer reports carry the
+/// grading hint (ADR 0048). Turn it off once enough grades exist; stored grades stay untouched.
+pub const SUBAGENT_GRADING_ENABLED: bool = true;
 /// How long a subagent may sit idle before boblm archives it as a safety net.
 pub const SUBAGENT_IDLE_ARCHIVE_AGE: Duration = Duration::from_secs(8 * 60 * 60);
 /// How often an open subagent conversation refreshes (contract).

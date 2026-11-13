@@ -124,6 +124,7 @@ pub struct App {
     pub(crate) schedule_claim: tokio::sync::Mutex<()>,
     claude_accounts: std::sync::Mutex<crate::claude_account::EnabledAccounts>,
     role_subagents_enabled: std::sync::atomic::AtomicBool,
+    subagent_grading_enabled: std::sync::atomic::AtomicBool,
     pub(crate) subagent_prune_at: std::sync::atomic::AtomicI64,
 }
 impl App {
@@ -163,6 +164,9 @@ impl App {
             role_subagents_enabled: std::sync::atomic::AtomicBool::new(
                 boblm_tuning::ROLE_SUBAGENTS_ENABLED,
             ),
+            subagent_grading_enabled: std::sync::atomic::AtomicBool::new(
+                boblm_tuning::SUBAGENT_GRADING_ENABLED,
+            ),
             claude_accounts: std::sync::Mutex::new(Default::default()),
             subagent_prune_at: std::sync::atomic::AtomicI64::new(0),
         }))
@@ -186,6 +190,18 @@ impl App {
             .lock()
             .unwrap_or_else(|error| error.into_inner()) =
             crate::claude_account::EnabledAccounts { plan, api };
+    }
+
+    pub(crate) fn subagent_grading_enabled(&self) -> bool {
+        self.subagent_grading_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Test seam: the production default is `SUBAGENT_GRADING_ENABLED`.
+    #[doc(hidden)]
+    pub fn set_subagent_grading_enabled_for_tests(&self, enabled: bool) {
+        self.subagent_grading_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub(crate) fn role_subagents_enabled(&self) -> bool {

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Summarize parent grades of subagents (ADR 0048). Read-only; prints no chat content.
+#   bin/grade-report           counts of good, ok and poor by role, model, effort and step
+#   bin/grade-report --notes   also print each note with its role, model and effort
+set -euo pipefail
+
+db=${BOBLM_DB:-$HOME/.local/share/boblm/boblm.sqlite}
+# The running server writes this database; wait for a commit instead of failing as locked.
+sqlite_wait_ms=5000
+notes=0
+
+usage() {
+  echo "Usage: bin/grade-report [--notes]" >&2
+  exit 2
+}
+
+while (($#)); do
+  case $1 in
+    --notes) notes=1; shift ;;
+    *) usage ;;
+  esac
+done
+
+[[ -f $db ]] || { echo "No database at $db. Set BOBLM_DB to its path." >&2; exit 1; }
+
+query() {
+  sqlite3 -readonly -cmd ".timeout $sqlite_wait_ms" -header -column "$db" "$1"
+}
+
+if [[ $(query "SELECT name FROM sqlite_master WHERE name = 'subagent_grades'" | wc -l) -eq 0 ]]; then
+  echo "The database has no subagent_grades table yet. Start a server with this release once." >&2
+  exit 1
+fi
+
+echo "Total grades:"
+query "SELECT COUNT(*) AS total,
+  COALESCE(SUM(rating = 'good'), 0) AS good,
+  COALESCE(SUM(rating = 'ok'), 0) AS ok,
+  COALESCE(SUM(rating = 'poor'), 0) AS poor
+  FROM subagent_grades"
+
+for column in role model effort step; do
+  echo
+  echo "By $column:"
+  query "SELECT COALESCE($column, '(unknown)') AS $column,
+    SUM(rating = 'good') AS good, SUM(rating = 'ok') AS ok, SUM(rating = 'poor') AS poor,
+    COUNT(*) AS total
+    FROM subagent_grades GROUP BY 1 ORDER BY total DESC, 1"
+done
+
+if ((notes)); then
+  echo
+  echo "Notes:"
+  query "SELECT rating, COALESCE(role, '-') AS role, COALESCE(model, '-') AS model,
+    COALESCE(effort, '-') AS effort, note
+    FROM subagent_grades WHERE note IS NOT NULL AND note <> '' ORDER BY updated_at"
+fi

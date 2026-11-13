@@ -7,6 +7,8 @@ pub use claude_accounts::ClaudeHandoff;
 mod deletions;
 pub use deletions::AgentDeletionReceipt;
 mod events;
+mod grades;
+pub use grades::{GradeOutcome, SubagentGrade};
 mod history;
 mod idle_nudges;
 pub use history::HistoryPage;
@@ -36,6 +38,8 @@ use std::{
 pub enum Error {
     #[error("{0}")]
     ChatDeletion(String),
+    #[error("{0}")]
+    Grade(String),
     #[error(transparent)]
     Sql(#[from] rusqlite::Error),
     #[error(transparent)]
