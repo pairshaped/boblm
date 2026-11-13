@@ -7,7 +7,9 @@ use boblm_tuning::ApiHeadroom;
 
 impl Reader {
     /// Measure one consistent snapshot. Token timestamps and `now` are Unix milliseconds.
-    /// Cached tokens count toward TPM. Mid-turn reviewers reserve their last call size;
+    /// Counts uncached tokens only: input, cache writes and output. Cache reads are excluded
+    /// because the owner's usage showed they do not trigger OpenAI rate limits. Cache writes
+    /// stay in because they are newly processed input. Mid-turn reviewers reserve their last call size;
     /// recently active and newly spawned reviewers also occupy the concurrency cap.
     pub fn api_reviewer_headroom(&self, now: i64) -> Result<ApiHeadroom> {
         let window =

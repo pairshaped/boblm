@@ -360,15 +360,25 @@ pub fn open_subagents(store: &Store, root_session_id: &str) -> Result<Vec<Value>
         let last = reader
             .last_activity(&session.id)
             .map_err(|error| format!("Could not read a subagent's idle time: {error}."))?;
-        open.push(json!({
-            "sessionId": session.id,
-            "name": session.name,
-            "role": session.role,
-            "model": session.model,
-            "modelLabel": boblm_tuning::model_display(&session.model),
-            "effort": session.effort,
-            "idleSeconds": (now.saturating_sub(last) / 1000).max(0),
-        }));
+        let idle = (now.saturating_sub(last) / 1000).max(0);
+        open.push(if session.role.as_deref() == Some("reviewer") {
+            json!({
+                "sessionId": session.id,
+                "name": session.name,
+                "role": session.role,
+                "idleSeconds": idle,
+            })
+        } else {
+            json!({
+                "sessionId": session.id,
+                "name": session.name,
+                "role": session.role,
+                "model": session.model,
+                "modelLabel": boblm_tuning::model_display(&session.model),
+                "effort": session.effort,
+                "idleSeconds": idle,
+            })
+        });
     }
     Ok(open)
 }
@@ -384,6 +394,22 @@ pub fn role_spawn_result(
     route: Value,
     open: Vec<Value>,
 ) -> Value {
+    let reviewer = session.role.as_deref() == Some("reviewer");
+    if reviewer {
+        // Reviews are graded blind: the parent learns nothing about the model or provider.
+        // The full routing stays in the stored receipt and the owner's web UI.
+        let mut session = json!(session);
+        blind_session(&mut session);
+        return json!({
+            "sessionId": session["sessionId"],
+            "messageId": session["sessionId"],
+            "accepted": true,
+            "alreadyAccepted": already_accepted,
+            "dispatchFailed": dispatch_failed,
+            "session": session,
+            "openSubagents": open,
+        });
+    }
     json!({
         "sessionId": session.session_id,
         "messageId": session.session_id,
@@ -394,6 +420,33 @@ pub fn role_spawn_result(
         "routing": route,
         "openSubagents": open,
     })
+}
+
+/// Remove the model, effort, provider and account facts from a serialized `SessionInfo`
+/// when it describes a reviewer, so agents grade reviews blind. Other roles are untouched.
+pub fn blind_reviewer_session(session: &mut Value) {
+    if session["role"] == "reviewer" {
+        blind_session(session);
+    }
+}
+
+fn blind_session(session: &mut Value) {
+    if let Some(object) = session.as_object_mut() {
+        object.remove("agent");
+        object.remove("agentSessionId");
+    }
+    if let Some(status) = session.get_mut("status").and_then(Value::as_object_mut) {
+        for field in [
+            "accountKey",
+            "accountUsage",
+            "usage",
+            "model",
+            "modelLabel",
+            "effort",
+        ] {
+            status.remove(field);
+        }
+    }
 }
 
 fn unix_millis() -> i64 {

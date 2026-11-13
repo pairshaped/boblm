@@ -2143,6 +2143,18 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
             "message":"review this", "role":"reviewer"
         })
     };
+    // Reviews are graded blind, so the result carries no routing; the stored receipt does.
+    let receipt = |id: u64| -> serde_json::Value {
+        let raw = store
+            .reader()
+            .unwrap()
+            .peer_spawn_receipt(&format!("00000000-0000-4000-8000-{id:012}"))
+            .unwrap()
+            .unwrap()
+            .resolved
+            .unwrap();
+        serde_json::from_str(&raw).unwrap()
+    };
     for id in 1..boblm_tuning::MAX_OPEN_REVIEWERS_PER_PROVIDER as u64 {
         let spawned = tool_value(
             &call(
@@ -2154,7 +2166,8 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
             )
             .await,
         );
-        assert_eq!(spawned["routing"]["step"], "reviewer-openai-api");
+        assert!(spawned.get("routing").is_none(), "{spawned}");
+        assert_eq!(receipt(id)["step"], "reviewer-openai-api");
     }
     let cap = boblm_tuning::MAX_OPEN_REVIEWERS_PER_PROVIDER as u64;
     let (first, second) = tokio::join!(
@@ -2173,18 +2186,25 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
             args(cap + 1)
         )
     );
-    let routes = [tool_value(&first), tool_value(&second)];
+    let routes = [(cap, tool_value(&first)), (cap + 1, tool_value(&second))];
+    let receipts = [receipt(cap), receipt(cap + 1)];
     assert_eq!(
-        routes
+        receipts
             .iter()
-            .filter(|route| route["routing"]["step"] == "reviewer-openai-api")
+            .filter(|route| route["step"] == "reviewer-openai-api")
             .count(),
         1
     );
-    let fallback = routes
+    let (fallback_id, fallback_result) = routes
         .iter()
-        .find(|route| route["routing"]["step"] == "reviewer-claude-api")
+        .find(|(id, _)| receipt(*id)["step"] == "reviewer-claude-api")
         .unwrap();
+    let fallback_route = receipt(*fallback_id);
+    assert_blind(fallback_result);
+    let fallback = &serde_json::json!({
+        "sessionId": fallback_result["sessionId"],
+        "routing": fallback_route,
+    });
     assert_eq!(fallback["routing"]["model"], boblm_tuning::MODEL_HAIKU);
     assert_eq!(
         fallback["routing"]["effort"],
@@ -2219,7 +2239,8 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
         .await,
     );
     assert_eq!(repeated["alreadyAccepted"], true);
-    assert_eq!(repeated["routing"]["step"], "reviewer-openai-api");
+    assert!(repeated.get("routing").is_none());
+    assert_eq!(receipt(1)["step"], "reviewer-openai-api");
     assert_eq!(
         store
             .reader()
@@ -2237,6 +2258,136 @@ async fn concurrent_reviewer_spawns_reserve_the_last_api_slot_once() {
             .active_reviewers,
         boblm_tuning::MAX_OPEN_REVIEWERS_PER_PROVIDER
     );
+    app.shutdown().await.unwrap();
+}
+
+/// A reviewer's description must not reveal model, effort, provider or account.
+fn assert_blind(value: &serde_json::Value) {
+    let text = value.to_string().to_lowercase();
+    for word in [
+        "model", "effort", "step", "account", "haiku", "luna", "openai", "claude", "codex",
+        "routing", "reason",
+    ] {
+        assert!(!text.contains(word), "{word} leaked: {text}");
+    }
+}
+
+#[tokio::test]
+async fn reviewer_results_and_peer_views_hide_the_model_but_implementers_show_it() {
+    let temp = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
+    let store = Store::open(temp.path().join("blind.sqlite")).unwrap();
+    store
+        .create_session("caller", temp.path().to_str().unwrap(), 1)
+        .unwrap();
+    let (inputs, _received) = tokio::sync::mpsc::unbounded_channel();
+    let app = App::open(
+        store.clone(),
+        Arc::new(SpawnFactory { inputs }),
+        "blind-review-token".into(),
+    )
+    .await
+    .unwrap();
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
+    let router = app.router(Some(temp.path().into()));
+    let spawn = |id: u64, role: &str| {
+        serde_json::json!({
+            "title":"Work", "requestId":format!("00000000-0000-4000-8000-{id:012}"),
+            "message":"do it", "role":role, "difficulty": if role == "implementer" { "simple" } else { "" }
+        })
+    };
+    let mut reviewer_args = spawn(1, "reviewer");
+    reviewer_args.as_object_mut().unwrap().remove("difficulty");
+    let reviewer = tool_value(
+        &call(
+            &router,
+            "blind-review-token",
+            "caller",
+            "spawn_subagent",
+            reviewer_args,
+        )
+        .await,
+    );
+    assert_blind(&reviewer);
+    assert_eq!(reviewer["accepted"], true);
+    let reviewer_id = reviewer["sessionId"].as_str().unwrap().to_owned();
+    let stored: serde_json::Value = serde_json::from_str(
+        &store
+            .reader()
+            .unwrap()
+            .peer_spawn_receipt("00000000-0000-4000-8000-000000000001")
+            .unwrap()
+            .unwrap()
+            .resolved
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored["model"], boblm_tuning::MODEL_GPT_6_LUNA);
+    assert!(stored["reason"].as_str().is_some());
+
+    let implementer = tool_value(
+        &call(
+            &router,
+            "blind-review-token",
+            "caller",
+            "spawn_subagent",
+            spawn(2, "implementer"),
+        )
+        .await,
+    );
+    assert!(
+        implementer["routing"]["model"].as_str().is_some(),
+        "{implementer}"
+    );
+    let implementer_id = implementer["sessionId"].as_str().unwrap().to_owned();
+    // The open-subagents list hides the reviewer's model and keeps the implementer's.
+    let open = implementer["openSubagents"].as_array().unwrap();
+    let reviewer_entry = open.iter().find(|a| a["sessionId"] == reviewer_id).unwrap();
+    assert_blind(reviewer_entry);
+    let implementer_entry = open
+        .iter()
+        .find(|a| a["sessionId"] == implementer_id)
+        .unwrap();
+    assert!(implementer_entry["model"].as_str().is_some());
+
+    let listed = tool_value(
+        &call(
+            &router,
+            "blind-review-token",
+            "caller",
+            "list_peers",
+            serde_json::json!({}),
+        )
+        .await,
+    );
+    let sessions = listed["sessions"].as_array().unwrap();
+    assert_blind(
+        sessions
+            .iter()
+            .find(|s| s["sessionId"] == reviewer_id)
+            .unwrap(),
+    );
+    assert!(
+        sessions
+            .iter()
+            .find(|s| s["sessionId"] == implementer_id)
+            .unwrap()["status"]["model"]
+            .as_str()
+            .is_some()
+    );
+    let inspected = tool_value(
+        &call(
+            &router,
+            "blind-review-token",
+            "caller",
+            "inspect_peer",
+            serde_json::json!({"sessionIdPrefix": reviewer_id}),
+        )
+        .await,
+    );
+    assert_blind(&inspected["session"]);
     app.shutdown().await.unwrap();
 }
 

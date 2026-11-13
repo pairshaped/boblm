@@ -17,7 +17,7 @@ const MEASURE_SQL: &str = r"WITH reviewers AS (
    ORDER BY e.seq DESC LIMIT 1), 0) AS mid_turn,
   COALESCE((SELECT MAX(e.created_at) FROM events e WHERE e.session = s.id
    AND e.kind IN ('agent_event', 'message_appended')), s.created_at) AS activity_at,
-  COALESCE((SELECT MAX(0, c.input_tokens) + MAX(0, c.cache_read_tokens)
+  COALESCE((SELECT MAX(0, c.input_tokens)
    + MAX(0, c.cache_write_tokens) + MAX(0, c.output_tokens)
    FROM usage_model_call c WHERE c.session = s.id AND c.provider = 'codex'
    AND c.model = ?1 ORDER BY c.last_seq DESC LIMIT 1), 0) AS last_tokens
@@ -25,7 +25,7 @@ const MEASURE_SQL: &str = r"WITH reviewers AS (
   AND s.role = 'reviewer' AND s.archived = 0 AND s.model = ?1
 )
 SELECT
- CAST(COALESCE((SELECT SUM(MAX(0, c.input_tokens) + MAX(0, c.cache_read_tokens)
+ CAST(COALESCE((SELECT SUM(MAX(0, c.input_tokens)
   + MAX(0, c.cache_write_tokens) + MAX(0, c.output_tokens))
   FROM usage_model_call c JOIN sessions s ON s.id = c.session
   WHERE c.provider = 'codex' AND s.account_key = ?2 AND c.model = ?1

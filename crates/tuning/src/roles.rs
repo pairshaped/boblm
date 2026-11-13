@@ -1576,6 +1576,68 @@ mod provider_cap_tests {
     }
 
     #[test]
+    fn luna_api_allows_four_reviewers_and_haiku_api_stays_at_three() {
+        assert_eq!(MAX_OPEN_REVIEWERS_PER_PROVIDER, 4);
+        assert_eq!(ProviderGroup::LunaApi.cap(), 4);
+        let luna = ProviderGroup::LunaApi as usize;
+        let mut counts = ProviderCounts::default();
+        for open in 0..4 {
+            counts.open[luna] = open;
+            counts.reviewers[luna] = open;
+            assert!(counts.rejection(ProviderGroup::LunaApi).is_none());
+            assert!(counts.reviewer_rejection(ProviderGroup::LunaApi).is_none());
+        }
+        counts.open[luna] = 4;
+        counts.reviewers[luna] = 4;
+        assert!(counts.rejection(ProviderGroup::LunaApi).is_some());
+        for group in [ProviderGroup::HaikuApiA, ProviderGroup::HaikuApiB] {
+            let index = group as usize;
+            counts.open[index] = 2;
+            counts.reviewers[index] = 2;
+            assert!(counts.rejection(group).is_none());
+            counts.open[index] = 3;
+            counts.reviewers[index] = 3;
+            assert!(
+                counts.rejection(group).is_some(),
+                "a third Haiku reviewer fills the account, so a fourth cannot start"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fifth_luna_reviewer_falls_through_to_haiku() {
+        let luna = ProviderGroup::LunaApi as usize;
+        for (open, expected) in [
+            (3, StepId::ReviewerOpenAiApi),
+            (4, StepId::ReviewerClaudeApi),
+        ] {
+            let mut counts = ProviderCounts {
+                enabled_plan: [true; 2],
+                enabled_api: [true; 2],
+                ..Default::default()
+            };
+            counts.open[luna] = open;
+            counts.reviewers[luna] = open;
+            let headroom = ApiHeadroom {
+                active_reviewers: open,
+                ..Default::default()
+            };
+            let RouteOutcome::Chosen(route) = resolve_with_groups(
+                Role::Reviewer,
+                Difficulty::Simple,
+                &[],
+                &[],
+                headroom,
+                1,
+                counts,
+            ) else {
+                panic!()
+            };
+            assert_eq!(route.step, expected);
+        }
+    }
+
+    #[test]
     fn provider_caps_reviewers_are_separate_per_account_and_do_not_limit_implementers() {
         let mut counts = ProviderCounts {
             enabled_plan: [true; 2],

@@ -59,7 +59,7 @@ fn report_content(
         )
     } else if tpm_limited {
         format!(
-            "Subagent {label} stopped because OpenAI API reached its tokens-per-minute rate limit. Its review may be incomplete. In a few seconds, use ping_peer with this subagent's session ID to ask it to continue. Nothing was resent automatically. Its last text follows.\n\n"
+            "Subagent {label} stopped because its model provider reached a tokens-per-minute rate limit. Its review may be incomplete. In a few seconds, use ping_peer with this subagent's session ID to ask it to continue. Nothing was resent automatically. The provider's error details are not shown.\n\n"
         )
     } else {
         format!("Subagent {label} finished. Its result follows.\n\n")
@@ -72,14 +72,21 @@ fn report_content(
             .filter(|name| !name.trim().is_empty())
             .unwrap_or(id);
         let role = agent["role"].as_str().unwrap_or("subagent");
-        let model = agent["modelLabel"]
-            .as_str()
-            .or_else(|| agent["model"].as_str())
-            .unwrap_or("unknown");
-        let effort = agent["effort"].as_str().unwrap_or("default");
         let idle = agent["idleSeconds"].as_u64().unwrap_or(0);
+        // Reviewers carry no model or effort: reviews are graded blind.
+        let on = match agent["model"].as_str() {
+            Some(_) => {
+                let model = agent["modelLabel"]
+                    .as_str()
+                    .or_else(|| agent["model"].as_str())
+                    .unwrap_or("unknown");
+                let effort = agent["effort"].as_str().unwrap_or("default");
+                format!(" on {model} at {effort}")
+            }
+            None => String::new(),
+        };
         lines.push(format!(
-            "- {name} ({id}), {role} on {model} at {effort}, idle {}",
+            "- {name} ({id}), {role}{on}, idle {}",
             idle_text(idle)
         ));
     }
@@ -96,6 +103,9 @@ fn report_content(
         error.trim().to_owned()
     } else if let Some((error, _)) = error {
         format!("\"{}\"", error.trim())
+    } else if tpm_limited {
+        // The raw error names the model, and reviews are graded blind.
+        String::new()
     } else {
         text.trim().to_owned()
     };
@@ -935,9 +945,12 @@ mod tests {
             .unwrap();
         let (text, _) = build_report(&h.store, &report).unwrap();
         assert!(
-            text.contains("stopped because OpenAI API reached its tokens-per-minute rate limit")
+            text.contains(
+                "stopped because its model provider reached a tokens-per-minute rate limit"
+            )
         );
         assert!(text.contains("review may be incomplete"));
+        assert!(!text.contains("OpenAI") && !text.contains("luna"), "{text}");
         assert!(text.contains("In a few seconds, use ping_peer"));
         assert!(text.contains("Nothing was resent automatically"));
         assert!(!text.contains("finished. Its result follows"));

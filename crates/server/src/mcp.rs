@@ -629,6 +629,7 @@ impl Peers {
                     .map_err(|e| format!("A stored message of that session could not be read back as JSON ({e}); the history may be damaged."))?;
                 let mut session = serde_json::json!(info);
                 label_status_model(&mut session);
+                crate::role_spawn::blind_reviewer_session(&mut session);
                 Ok(serde_json::json!({"session":session,"messages":messages}))
             }
             .await,
@@ -904,7 +905,7 @@ impl Peers {
         }.await)
     }
     #[tool(
-        description = "Create a hidden role subagent under THIS chat with a required title, and accept its first work message. role is implementer, reviewer or planner; planner: only when the owner explicitly asks for a planner. Only implementers need difficulty simple or hard. For mechanical work, use an implementer or spawn_peer with an explicit model. Use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). The model, effort and account come from BobLM's role resolver and are named in the result. No subagent may spawn another subagent. Provider account caps count all open chats, including owner chats. They only stop agents from starting more peers or subagents. Reviewers may have at most three open chats per provider account; archive finished reviewers. Archive finished chats to free slots. The result lists the parent's open subagents with idle times. After a runaway pause, inspect progress and decide whether to ping for a fresh round or archive; if unsure, ask the owner with ask before continuing. Supply a fresh requestId UUID; an identical retry returns the stored routing and never re-resolves. The title is part of the retry identity, so a different title with the same requestId conflicts."
+        description = "Create a hidden role subagent under THIS chat with a required title, and accept its first work message. role is implementer, reviewer or planner; planner: only when the owner explicitly asks for a planner. Only implementers need difficulty simple or hard. For mechanical work, use an implementer or spawn_peer with an explicit model. Use reviewer for independent code review and implementer for implementation and repairs; use planner for planning and hard design questions (Opus high on the Claude plan, with no fallback). The model, effort and account come from BobLM's role resolver and are named in the result for implementers and planners; a reviewer's result does not name them. No subagent may spawn another subagent. Provider account caps count all open chats, including owner chats. They only stop agents from starting more peers or subagents. Reviewers have a per-provider-account open limit; archive finished reviewers. Archive finished chats to free slots. The result lists the parent's open subagents with idle times. After a runaway pause, inspect progress and decide whether to ping for a fresh round or archive; if unsure, ask the owner with ask before continuing. Supply a fresh requestId UUID; an identical retry returns the stored routing and never re-resolves. The title is part of the retry identity, so a different title with the same requestId conflicts."
     )]
     async fn spawn_subagent(
         &self,
@@ -1317,6 +1318,7 @@ impl Peers {
         let mut sessions = serde_json::json!(peers);
         for session in sessions.as_array_mut().into_iter().flatten() {
             label_status_model(session);
+            crate::role_spawn::blind_reviewer_session(session);
         }
         Ok(serde_json::json!({"sessions":sessions,"hasMore":has_more}))
     }

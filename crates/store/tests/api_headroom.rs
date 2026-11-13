@@ -3,7 +3,7 @@ use boblm_tuning::{ApiHeadroom, CODEX_ACCOUNT_KEY_API, CODEX_ACCOUNT_KEY_PLAN, M
 use serde_json::json;
 
 #[test]
-fn api_headroom_counts_cached_tokens_and_only_projects_mid_turn_api_reviewers() {
+fn api_headroom_counts_uncached_tokens_and_only_projects_mid_turn_api_reviewers() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("headroom.sqlite");
     let store = Store::open(&path).unwrap();
@@ -56,8 +56,10 @@ fn api_headroom_counts_cached_tokens_and_only_projects_mid_turn_api_reviewers() 
             .unwrap();
     };
     call("busy", now - 100, 100, 200);
-    call("busy", now - 50, 200, 300);
+    // Cache reads are huge here and in "fresh"; only input, cache writes and output count.
+    call("busy", now - 50, 200, 5_000_000);
     call("recent", now - 1, 300, 400);
+    call("fresh", now - 1, 0, 90_000_000);
     call("old", now - 60_000, 400, 500);
     call("archived", now - 1, 500, 600);
     call("plan", now - 1, 600, 700);
@@ -75,8 +77,8 @@ fn api_headroom_counts_cached_tokens_and_only_projects_mid_turn_api_reviewers() 
     assert_eq!(
         store.reader().unwrap().api_reviewer_headroom(now).unwrap(),
         ApiHeadroom {
-            recent_tokens: 330 + 530 + 730 + 1_130 + 1_530,
-            projected_tokens: 530,
+            recent_tokens: 130 + 230 + 330 + 530 + 730 + 30,
+            projected_tokens: 230,
             active_reviewers: 3,
         }
     );
@@ -89,7 +91,7 @@ fn api_headroom_counts_cached_tokens_and_only_projects_mid_turn_api_reviewers() 
             .unwrap(),
         ApiHeadroom {
             recent_tokens: 0,
-            projected_tokens: 530,
+            projected_tokens: 230,
             active_reviewers: 1,
         }
     );

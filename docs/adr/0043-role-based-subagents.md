@@ -98,30 +98,43 @@ Nothing is resent automatically.
 ## API reviewer headroom
 
 At spawn time, the store measures Luna calls on `codex-api` in the last
-`OPENAI_API_TPM_WINDOW` (60 seconds), including cached input and output tokens.
+`OPENAI_API_TPM_WINDOW` (60 seconds). Only uncached tokens count: input, cache
+writes and output. Cache reads are excluded, because the owner's usage showed
+cached input does not trigger OpenAI rate limits; cache writes stay because they
+are newly processed input.
 It adds each unarchived API reviewer's last call size again when that reviewer
 is mid-turn, even when the last call is older than the window. The combined
-number must be strictly below `OPENAI_API_TPM_LIMIT` (2,000,000) times
-`OPENAI_API_TPM_BUDGET` (0.5), a 1,000,000-token spawn budget. The unused half
+number must be strictly below `OPENAI_API_TPM_LIMIT` times
+`OPENAI_API_TPM_BUDGET` (0.5). The 2,000,000-token limit is an assumption, to be
+checked against the OpenAI platform limits page, which makes the spawn budget
+1,000,000 uncached tokens. The unused half
 leaves room for already running reviews to finish as their contexts grow.
 
 All Luna API chats also share the global open-chat cap.
 The activity-window guard also requires the number of unarchived API reviewers
 to be strictly below
-`OPENAI_API_MAX_ACTIVE_REVIEWERS` (3). A reviewer counts while mid-turn or when
+`OPENAI_API_MAX_ACTIVE_REVIEWERS` (4). A reviewer counts while mid-turn or when
 its latest agent event or input is within the same 60-second window. A newly
 spawned reviewer counts immediately, before it has a usage sample. Route
 selection and receipt creation share a server lock so simultaneous spawns
 cannot all claim the last slot. The lock stays held if the caller disconnects.
 
-These defaults retain the owner's requested buffer. A local dev-instance copy
-of the usage records contained 983 API Luna calls in the latest day, averaging
-107,307 tokens with a maximum of 247,186. Three requests at that maximum reserve
-about 742,000 tokens before counting recent completed requests. This is a spawn guard, not a guarantee against a provider rate limit;
+These defaults retain the owner's requested buffer. In a local dev-instance copy
+of the usage records, the busiest minute held 3.5M total tokens, of which only
+about 25,000 were uncached; the API account was never rate limited. A reviewer
+reserves only the uncached part of its last call, so four mid-turn reviewers
+reserve a small fraction of the 1,000,000-token budget unless their calls carry
+large uncached inputs. This is a spawn guard, not a guarantee against a provider rate limit;
 long reviews keep their account and may send several requests per minute.
 The route reason includes the measured number that blocked an API spawn and
 the chosen fallback. Haiku API fallback depends on credit exhaustion marks and the
 per-account Haiku caps.
+
+Reviews are graded blind, so parents are not told which model reviewed. For a
+reviewer, the spawn result, `list_peers`, `inspect_peer`, the open-subagents list
+and subagent reports omit the model, effort, provider, account and routing reason.
+The full routing stays in the stored spawn receipt and the owner's web UI, and a
+Haiku review is a normal review.
 
 The role table, efforts and model IDs are constants in `crates/tuning`. The
 resolver is pure: `resolve(role, difficulty, readings, exhausted_marks, api_headroom, now)`
@@ -154,10 +167,11 @@ There are no per-root or global total caps. `MAX_OPEN_REVIEWERS_PER_PROVIDER`
 (3) also limits open reviewers in each provider account. Implementers and owner
 chats without a reviewer role do not consume reviewer slots. Reviewer routing
 skips a group when either cap is full; both are checked in the insert transaction.
-For Luna API, the reviewer sub-cap and activity-window guard both allow three
-reviewers, matching the total group cap.
+For Luna API, the reviewer sub-cap and activity-window guard both allow four
+reviewers, matching the total group cap. Haiku API accounts are capped at three
+open chats each, so at most three Haiku reviewers fit per account.
 
-The caps are `OPENAI_API_MAX_ACTIVE_REVIEWERS` (3) for Luna API,
+The caps are `OPENAI_API_MAX_ACTIVE_REVIEWERS` (4) for Luna API,
 `MAX_OPEN_HAIKU_API_AGENTS` (3) per Claude API account,
 `MAX_OPEN_CODEX_PLAN_AGENTS` (10), `MAX_OPEN_CLAUDE_PLAN_AGENTS` (10) per Claude
 plan account, and `MAX_OPEN_DSF_API_AGENTS` (5).
