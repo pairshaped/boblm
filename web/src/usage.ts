@@ -8,7 +8,7 @@ import type { AllowanceReading, SessionInfo } from "./generated/contract.ts";
 
 type MeterAllowance = AllowanceReading;
 
-function meter(
+export function meter(
   label: string,
   percent: number | null,
   detail: string,

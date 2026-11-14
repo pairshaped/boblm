@@ -71,6 +71,26 @@ pub async fn api_key(account: &str) -> Result<String, String> {
         .await
 }
 
+/// The provider's own account ID for a plan key, else the last one a chat of that key launched with.
+pub fn plan_account_id(reader: &boblm_store::Reader, data_dir: &Path, key: &str) -> Option<String> {
+    account_id(data_dir, key).or_else(|| {
+        reader
+            .sessions()
+            .ok()?
+            .into_iter()
+            .find(|session| {
+                session.agent == "claude"
+                    && session
+                        .account_key
+                        .as_deref()
+                        .unwrap_or(CLAUDE_ACCOUNT_KEY_PLAN_A)
+                        == key
+                    && session.account_id.as_deref().is_some_and(|id| !is_api(id))
+            })
+            .and_then(|session| session.account_id)
+    })
+}
+
 /// Attribute each sample to the UUID from that account's own config, never another chat.
 pub fn plan_accounts(
     store: &boblm_store::Store,
@@ -83,22 +103,7 @@ pub fn plan_accounts(
         .map_err(|error| error.to_string())?;
     let mut accounts = Vec::new();
     for &key in enabled {
-        let id = account_id(data_dir, key).or_else(|| {
-            reader
-                .sessions()
-                .ok()?
-                .into_iter()
-                .find(|session| {
-                    session.agent == "claude"
-                        && session
-                            .account_key
-                            .as_deref()
-                            .unwrap_or(CLAUDE_ACCOUNT_KEY_PLAN_A)
-                            == key
-                        && session.account_id.as_deref().is_some_and(|id| !is_api(id))
-                })
-                .and_then(|session| session.account_id)
-        });
+        let id = plan_account_id(&reader, data_dir, key);
         let usage = id
             .map(|id| reader.account_usage("claude", &id))
             .transpose()

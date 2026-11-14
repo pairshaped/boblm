@@ -2948,3 +2948,134 @@ async fn claude_spawns_choose_independently_of_a_parent_pinned_to_plan_b() {
     );
     app.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn account_usage_command_lists_labeled_enabled_accounts_without_secrets() {
+    let temp = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
+    let store = Store::open(temp.path().join("modal.sqlite")).unwrap();
+    store.create_session("plan-b", "/b", 1).unwrap();
+    let project = store
+        .reader()
+        .unwrap()
+        .sessions()
+        .unwrap()
+        .into_iter()
+        .find(|session| session.id == "plan-b")
+        .and_then(|session| session.project_id)
+        .unwrap();
+    store
+        .create_session_in(boblm_store::NewSession {
+            id: "codex-chat",
+            project_id: &project,
+            name: "",
+            agent: "codex",
+            model: "gpt-6.1-sol",
+            effort: None,
+            created_at: 2,
+        })
+        .unwrap();
+    store
+        .set_claude_account_key("plan-b", boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B)
+        .unwrap();
+    store
+        .set_session_account("plan-b", Some("secret-claude-b-id"))
+        .unwrap();
+    store
+        .set_session_account("codex-chat", Some("secret-codex-id"))
+        .unwrap();
+    for (session, usage) in [
+        (
+            "plan-b",
+            serde_json::json!({"type":"usage","weekly":{"usedPercent":30,"resetsAt":2000000000}}),
+        ),
+        (
+            "codex-chat",
+            serde_json::json!({"type":"usage","five_hour":{"usedPercent":10,"resetsAt":2000000000},"credits":{"hasCredits":true,"unlimited":false,"balance":500}}),
+        ),
+    ] {
+        store
+            .record_event(session, "agent_event", usage, 10_000)
+            .unwrap();
+    }
+    let token = "peer-test-owner-token-only";
+    let app = App::open(store, Arc::new(NeverSpawn), token.into())
+        .await
+        .unwrap();
+    let router = app.router(Some(temp.path().into()));
+    let fetch = |body: serde_json::Value| {
+        let router = router.clone();
+        async move {
+            let response = router
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/commands/accountUsage")
+                        .header("Authorization", format!("Bearer {token}"))
+                        .header("Content-Type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            )
+        }
+    };
+    app.set_claude_accounts_for_tests(
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A],
+        &[boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A],
+    );
+    let (status, reply) = fetch(serde_json::json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    let labels = |reply: &serde_json::Value| -> Vec<String> {
+        reply["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|account| account["label"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(
+        labels(&reply),
+        ["Codex plan", "Claude plan A", "OpenAI API", "Claude API A"]
+    );
+    let codex = &reply["accounts"][0];
+    assert_eq!(codex["kind"], "plan");
+    assert_eq!(codex["fiveHour"]["usedPercent"], 10.0);
+    assert_eq!(codex["credits"]["balance"], 500.0);
+    assert_eq!(reply["accounts"][2]["kind"], "api");
+    assert!(reply["accounts"][2]["weekly"].is_null());
+    app.set_claude_accounts_for_tests(
+        &[
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A,
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B,
+        ],
+        &[
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_API_A,
+            boblm_tuning::CLAUDE_ACCOUNT_KEY_API_B,
+        ],
+    );
+    let (_, reply) = fetch(serde_json::json!({})).await;
+    assert_eq!(
+        labels(&reply),
+        [
+            "Codex plan",
+            "Claude plan A",
+            "Claude plan B",
+            "OpenAI API",
+            "Claude API A",
+            "Claude API B"
+        ]
+    );
+    assert_eq!(reply["accounts"][2]["weekly"]["usedPercent"], 30.0);
+    let text = reply.to_string();
+    assert!(!text.contains("secret-"), "{text}");
+    assert!(!text.contains("accountId"), "{text}");
+    let (status, _) = fetch(serde_json::json!({"extra": 1})).await;
+    assert_ne!(status, StatusCode::OK);
+    app.shutdown().await.unwrap();
+}

@@ -1611,3 +1611,58 @@ pre {
   justify-content: space-between;
   align-items: center;
 }
+
+.dialog.account-usage-dialog {
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+/* The usage modal opens from inside the phone sidebar drawer (z-index 20), so it sits above it. */
+.backdrop.account-usage-backdrop {
+  z-index: 50;
+}
+.account-usage-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+}
+.account-usage-dialog > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.account-usage {
+  overflow-y: auto;
+}
+.account-usage-account {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.account-usage-account h3,
+.account-usage-account p {
+  margin: 0;
+}
+.account-usage .usage-meter {
+  width: 100%;
+}
+.account-window {
+  display: grid;
+  gap: 4px;
+}
+.account-window small {
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+.account-window .account-window-age {
+  font-size: 0.85em;
+}
+@media (max-width: 650px) {
+  .dialog.account-usage-dialog {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+  }
+}

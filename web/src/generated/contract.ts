@@ -2,6 +2,8 @@
 import { decode } from '../decoder.ts';
 export type JsonValue = null | boolean | number | string | ReadonlyArray<JsonValue> | { readonly [key: string]: JsonValue };
 export type AccountUsage = { readonly "accountId": string; readonly "credits"?: (CreditsReading | null); readonly "fiveHour"?: (AllowanceReading | null); readonly "provider": string; readonly "weekly"?: (AllowanceReading | null); };
+export type AccountUsageInfo = { readonly "credits"?: (CreditsReading | null); readonly "fiveHour"?: (AllowanceReading | null); readonly "kind": string; readonly "label": string; readonly "provider": string; readonly "weekly"?: (AllowanceReading | null); };
+export type AccountUsageReply = { readonly "accounts": ReadonlyArray<AccountUsageInfo>; };
 export type AddProject = { readonly "name"?: string | null; readonly "path": string; readonly "projectId": string; };
 export type Agent = "claude" | "codex" | "pi";
 export type AgentSessionChangedEvent = { readonly "agent_session_id": string; readonly "previous"?: string | null; };
@@ -30,6 +32,7 @@ export type ErrorInfo = { readonly "code": string; readonly "message": string; }
 export type EventPage = { readonly "cursor": Sequence; readonly "events": ReadonlyArray<StoredEvent>; readonly "hasMore": boolean; readonly "sessionId": string; readonly "status": SessionStatus; };
 export type ExpiredFrom = ("queued" | "uncertain");
 export type JobSnapshot = { readonly "available": boolean; readonly "tasks": ReadonlyArray<BackgroundJob>; };
+export type ListAccountUsage = Readonly<Record<string, never>>;
 export type ListDirectories = { readonly "path"?: string | null; };
 export type ListQuestions = Readonly<Record<string, never>>;
 export type ListSessionsResponse = { readonly "cursor"?: Sequence; readonly "models": ReadonlyArray<ModelOption>; readonly "projects": ReadonlyArray<ProjectInfo>; readonly "sessions": ReadonlyArray<SessionInfo>; };
@@ -114,6 +117,73 @@ export const contractSchema = {
       "required": [
         "provider",
         "accountId"
+      ],
+      "type": "object"
+    },
+    "AccountUsageInfo": {
+      "additionalProperties": false,
+      "description": "One provider account for the usage modal. Plan accounts carry allowance readings; API\naccounts report none. Nothing here identifies credentials or paths.",
+      "properties": {
+        "credits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CreditsReading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fiveHour": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AllowanceReading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "description": "`plan` or `api`.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "weekly": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AllowanceReading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "label",
+        "kind",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "AccountUsageReply": {
+      "additionalProperties": false,
+      "properties": {
+        "accounts": {
+          "items": {
+            "$ref": "#/$defs/AccountUsageInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "accounts"
       ],
       "type": "object"
     },
@@ -717,6 +787,10 @@ export const contractSchema = {
         "tasks",
         "available"
       ],
+      "type": "object"
+    },
+    "ListAccountUsage": {
+      "additionalProperties": false,
       "type": "object"
     },
     "ListDirectories": {
@@ -2457,6 +2531,12 @@ export const contractSchema = {
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "account_usage_reply": {
+      "$ref": "#/$defs/AccountUsageReply"
+    },
+    "account_usage_request": {
+      "$ref": "#/$defs/ListAccountUsage"
+    },
     "add_project": {
       "$ref": "#/$defs/AddProject"
     },
@@ -2601,6 +2681,8 @@ export const contractSchema = {
     "chat_presence_reply",
     "questions",
     "list_questions",
+    "account_usage_request",
+    "account_usage_reply",
     "answer_question",
     "discuss_question_later",
     "submit_secret",
@@ -2644,6 +2726,7 @@ export function parseQuestionInfo(value: unknown): QuestionInfo { return decode(
 export function parseQuestionState(value: unknown): QuestionState { return decode(contractSchema, "QuestionState", value) as QuestionState; }
 export function parseDiscussQuestionLater(value: unknown): DiscussQuestionLater { return decode(contractSchema, "DiscussQuestionLater", value) as DiscussQuestionLater; }
 export function parseQuestionsReply(value: unknown): QuestionsReply { return decode(contractSchema, "QuestionsReply", value) as QuestionsReply; }
+export function parseAccountUsageReply(value: unknown): AccountUsageReply { return decode(contractSchema, "AccountUsageReply", value) as AccountUsageReply; }
 export function parseAnswerQuestion(value: unknown): AnswerQuestion { return decode(contractSchema, "AnswerQuestion", value) as AnswerQuestion; }
 export function parseSubmitSecret(value: unknown): SubmitSecret { return decode(contractSchema, "SubmitSecret", value) as SubmitSecret; }
 export function parseSecretReply(value: unknown): SecretReply { return decode(contractSchema, "SecretReply", value) as SecretReply; }

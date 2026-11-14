@@ -326,6 +326,7 @@ impl App {
                 "/commands/chatPresence",
                 post(crate::notifications::presence),
             )
+            .route("/commands/accountUsage", post(crate::account_usage::list))
             .route("/commands/listQuestions", post(crate::questions::list))
             .route("/commands/answerQuestion", post(crate::questions::answer))
             .route(

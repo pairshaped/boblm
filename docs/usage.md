@@ -72,16 +72,19 @@ A dash means the agent hasn't reported a usable sample. After a weekly reset,
 the old percentage stays unavailable until a fresh sample arrives. Opening a
 chat doesn't start an agent just to fill these bars.
 
-## The two lock icons
+## The follow lock and the account usage clock
 
 The small lock beneath the message scrollbar means the view is following new
 messages. It's an indicator, not a button. Scroll up to stop following; the lock
 disappears and new output won't pull you back down. Use the down-arrow button to
 jump directly to the latest messages and follow them again.
 
-The lock button above the project list disconnects this browser after
-confirmation. You'll need the server token to reconnect. Agents keep working on
-the server while the browser is locked.
+The clock button above the project list opens Account usage: the allowance
+remaining for each account, with reset times and how old each reading is. It
+loads fresh readings each time you open it. The quiet Lock button at the bottom
+of that window disconnects this browser after confirmation. You'll need the
+server token to reconnect. Agents keep working on the server while the browser
+is locked.
 
 ## Reading long chats
 

@@ -437,9 +437,18 @@ test("Pi models form their own group and offer only their supported efforts", as
 test("Lock asks for confirmation before changing authentication", async () => {
   const { dom, handle } = await mounted(initial("fixture-token"));
   try {
-    const lock = dom.window.document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Lock"]',
-    )!;
+    const document = dom.window.document;
+    assert.equal(
+      document.querySelector('.header-icon[aria-label="Lock"]'),
+      null,
+    );
+    document.querySelector<HTMLButtonElement>("#open-account-usage")!.click();
+    await handle.settle();
+    const lock = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        "#account-usage-dialog button",
+      ),
+    ].find((button) => button.textContent === "Lock")!;
     lock.click();
     await handle.settle();
     assert.equal(

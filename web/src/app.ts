@@ -16,6 +16,7 @@ import {
   type Subagent,
 } from "./subagents.ts";
 import { questionsContent } from "./questions.ts";
+import { accountUsageContent } from "./account-usage.ts";
 import { speechText, supportsSpeech } from "./speech.ts";
 import {
   h,
@@ -29,6 +30,8 @@ import {
   type SessionInfo,
   type QuestionInfo,
   type QuestionsReply,
+  type AccountUsageInfo,
+  type AccountUsageReply,
   type ModelOption,
   type SessionStatus,
   type StoredEvent,
@@ -179,6 +182,11 @@ export type Model = {
   /** Whether the agents and jobs drawer is open. */
   drawerOpen: boolean;
   questionsOpen: boolean;
+  accountUsageOpen: boolean;
+  accountUsage: ReadonlyArray<AccountUsageInfo>;
+  accountUsageLoading: boolean;
+  accountUsageError: string;
+  accountUsageGeneration: number;
   /** On a phone, whether the chat list covers the screen. It also shows with no chat open or no login. */
   sidebarOpen: boolean;
   /** The chat that was open when the page loaded, reopened once the chat list arrives. */
@@ -324,6 +332,9 @@ export type Msg =
   | { type: "answerQuestion"; id: string; answer: string }
   | { type: "reloadQuestions" }
   | { type: "openQuestions" }
+  | { type: "openAccountUsage" }
+  | { type: "closeAccountUsage" }
+  | { type: "reloadAccountUsage" }
   | { type: "closeQuestions" }
   | { type: "openImage"; id: string }
   | { type: "closeImage" }
@@ -407,6 +418,7 @@ export type Effect =
   | { type: "togglePush"; enabled: boolean; token: string }
   | { type: "focusQuestion"; id: string }
   | { type: "focusQuestions"; open: boolean }
+  | { type: "focusAccountUsage"; open: boolean }
   | { type: "focusLightbox" }
   | { type: "focusImage"; id: string }
   | { type: "persistLastChat"; id: string | null }
@@ -528,6 +540,11 @@ export function initial(
     pushState: "unavailable",
     drawerTab: "agents",
     questionsOpen: false,
+    accountUsageOpen: false,
+    accountUsage: [],
+    accountUsageLoading: false,
+    accountUsageError: "",
+    accountUsageGeneration: 0,
     subagentConversation: null,
     subagentGeneration: 0,
     subagents: [],
@@ -841,6 +858,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
           connectionGeneration: model.connectionGeneration + 1,
           historyGeneration: model.historyGeneration + 1,
           orderGeneration: model.orderGeneration + 1,
+          accountUsageGeneration: model.accountUsageGeneration + 1,
         },
         [{ type: "persist", token: "", drafts: model.drafts }],
       ];
@@ -2059,6 +2077,36 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         { ...model, questionsOpen: false },
         [{ type: "focusQuestions", open: false }],
       ];
+    case "openAccountUsage":
+    case "reloadAccountUsage": {
+      const generation = model.accountUsageGeneration + 1;
+      return [
+        {
+          ...model,
+          accountUsageOpen: true,
+          accountUsage:
+            msg.type === "openAccountUsage" ? [] : model.accountUsage,
+          accountUsageLoading: true,
+          accountUsageError: "",
+          accountUsageGeneration: generation,
+        },
+        [
+          ...(msg.type === "openAccountUsage"
+            ? [{ type: "focusAccountUsage", open: true } as const]
+            : []),
+          request("accountUsage", {}, undefined, generation),
+        ],
+      ];
+    }
+    case "closeAccountUsage":
+      return [
+        {
+          ...model,
+          accountUsageOpen: false,
+          accountUsageGeneration: model.accountUsageGeneration + 1,
+        },
+        [{ type: "focusAccountUsage", open: false }],
+      ];
     case "reloadQuestions": {
       const generation = model.questionGeneration + 1;
       return [
@@ -2344,6 +2392,31 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
       // A command already in flight can be refused after its chat was deleted. That refusal
       // belongs to a chat the browser has forgotten, so it must not replace the current error.
       if (msg.sessionId && model.forgotten[msg.sessionId]) return [model, []];
+      if (msg.name === "accountUsage") {
+        if (msg.orderGeneration !== model.accountUsageGeneration)
+          return [model, []];
+        if (msg.outcome.kind === "replied")
+          return [
+            {
+              ...model,
+              accountUsage: (msg.outcome.reply as AccountUsageReply).accounts,
+              accountUsageLoading: false,
+              accountUsageError: "",
+            },
+            [],
+          ];
+        return [
+          {
+            ...model,
+            accountUsageLoading: false,
+            accountUsageError:
+              msg.outcome.kind === "rejected"
+                ? msg.outcome.error.message
+                : "Account usage could not be loaded. Check the connection and choose Try again.",
+          },
+          [],
+        ];
+      }
       if (msg.name === "listQuestions") {
         if (msg.orderGeneration !== model.questionGeneration)
           return [model, []];
@@ -4108,10 +4181,13 @@ export function view(model: Model): VNode<Model> {
           ? h(
               "button",
               {
-                onClick: on.clicked({ type: "requestLock" }),
-                class: "header-icon sidebar-lock",
-                "aria-label": "Lock",
-                title: "Lock",
+                id: "open-account-usage",
+                type: "button",
+                onClick: on.clicked({ type: "openAccountUsage" }),
+                class: "header-icon account-usage-toggle",
+                "aria-label": "Account usage",
+                title: "Account usage",
+                "aria-haspopup": "dialog",
               },
               h(
                 "svg",
@@ -4124,8 +4200,8 @@ export function view(model: Model): VNode<Model> {
                   "stroke-width": 2,
                   "aria-hidden": "true",
                 },
-                h("rect", { x: 5, y: 10, width: 14, height: 11, rx: 2 }),
-                h("path", { d: "M8 10V7a4 4 0 0 1 8 0v3" }),
+                h("circle", { cx: 12, cy: 12, r: 9 }),
+                h("path", { d: "M12 7v5l3 2" }),
               ),
             )
           : null,
@@ -5148,6 +5224,7 @@ export function view(model: Model): VNode<Model> {
       ? lightboxView(model, model.lightbox, model.thumbs[model.lightbox.id]!)
       : null,
     model.questionsOpen ? questionsDialog(model) : null,
+    model.accountUsageOpen ? accountUsageDialog(model) : null,
     model.newChat ? newChatDialog(model, model.newChat) : null,
     model.renameChat ? renameChatDialog(model.renameChat) : null,
     model.directoryPicker ? directoryDialog(model.directoryPicker) : null,
@@ -5790,6 +5867,72 @@ function questionsButton(model: Model) {
     model.questionPendingCount
       ? h("span", { class: "count" }, String(model.questionPendingCount))
       : null,
+  );
+}
+function accountUsageDialog(model: Model) {
+  return h(
+    "div",
+    { class: "backdrop account-usage-backdrop" },
+    h(
+      "section",
+      {
+        id: "account-usage-dialog",
+        class: "dialog account-usage-dialog",
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-label": "Account usage",
+        onkeydown: binding((event) => {
+          const key = event as KeyboardEvent;
+          if (key.key === "Escape") return { type: "closeAccountUsage" };
+          if (key.key === "Tab") {
+            const fields = [
+              ...(event.currentTarget as Element).querySelectorAll<HTMLElement>(
+                "button:not(:disabled)",
+              ),
+            ];
+            const first = fields[0],
+              last = fields.at(-1);
+            if (key.shiftKey && event.target === first) {
+              event.preventDefault();
+              last?.focus();
+            } else if (!key.shiftKey && event.target === last) {
+              event.preventDefault();
+              first?.focus();
+            }
+          }
+          return { type: "noop" };
+        }),
+      },
+      h(
+        "header",
+        {},
+        h("strong", {}, "Account usage"),
+        h(
+          "button",
+          {
+            type: "button",
+            autofocus: true,
+            "aria-label": "Close account usage",
+            onClick: on.clicked({ type: "closeAccountUsage" }),
+          },
+          "Close",
+        ),
+      ),
+      accountUsageContent(model),
+      h(
+        "footer",
+        {},
+        h(
+          "button",
+          {
+            type: "button",
+            class: "quiet",
+            onClick: on.clicked({ type: "requestLock" }),
+          },
+          "Lock",
+        ),
+      ),
+    ),
   );
 }
 function questionsDialog(model: Model) {

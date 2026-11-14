@@ -917,6 +917,8 @@ pub struct ContractSchemas {
     chat_presence_reply: ChatPresenceReply,
     questions: QuestionsReply,
     list_questions: ListQuestions,
+    account_usage_request: ListAccountUsage,
+    account_usage_reply: AccountUsageReply,
     answer_question: AnswerQuestion,
     discuss_question_later: DiscussQuestionLater,
     submit_secret: SubmitSecret,
@@ -1262,6 +1264,36 @@ impl CommandBody for DiscussQuestionLater {
         check_session(&self.session_id)?;
         check_uuid("questionId", &self.question_id)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListAccountUsage {}
+
+impl CommandBody for ListAccountUsage {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// One provider account for the usage modal. Plan accounts carry allowance readings; API
+/// accounts report none. Nothing here identifies credentials or paths.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AccountUsageInfo {
+    pub label: String,
+    /// `plan` or `api`.
+    pub kind: String,
+    pub provider: String,
+    pub five_hour: Option<crate::usage::AllowanceReading>,
+    pub weekly: Option<crate::usage::AllowanceReading>,
+    pub credits: Option<crate::usage::CreditsReading>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AccountUsageReply {
+    pub accounts: Vec<AccountUsageInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

@@ -499,6 +499,16 @@ const run = async (dispatch: (msg: Msg) => void, effect: Effect) => {
     );
     return;
   }
+  if (effect.type === "focusAccountUsage") {
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(
+          effect.open ? "#account-usage-dialog button" : "#open-account-usage",
+        )
+        ?.focus(),
+    );
+    return;
+  }
   if (effect.type === "focusQuestion") {
     requestAnimationFrame(() => {
       const question = document.getElementById(`question-${effect.id}`);

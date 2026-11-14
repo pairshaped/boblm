@@ -183,6 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "QuestionState",
         "DiscussQuestionLater",
         "QuestionsReply",
+        "AccountUsageReply",
         "AnswerQuestion",
         "SubmitSecret",
         "SecretReply",

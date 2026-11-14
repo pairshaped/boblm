@@ -38,4 +38,5 @@ mod subagent_wake;
 
 pub mod persistent;
 
+mod account_usage;
 mod claude_account;

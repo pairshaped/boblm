@@ -8,6 +8,7 @@ import {
   parsePushConfigReply,
   parseChatPresenceReply,
   parseQuestionsReply,
+  parseAccountUsageReply,
   parseSessionInfo,
   parseSendMessageResponse,
   parseCommandResponse,
@@ -33,6 +34,7 @@ export function parseCommandReply(name: string, value: unknown): unknown {
     name === "discussQuestionLater"
   )
     return parseQuestionsReply(value);
+  if (name === "accountUsage") return parseAccountUsageReply(value);
   if (name === "submitSecret") return parseSecretReply(value);
   if (name === "createSession") return parseSessionInfo(value);
   if (name === "sendMessage") return parseSendMessageResponse(value);
