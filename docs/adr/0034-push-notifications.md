@@ -3,8 +3,8 @@
 The app supports standards-based Web Push over the existing HTTPS deployment. The browser has a web
 app manifest, PNG icons, and a push-only service worker. The worker doesn't cache application assets.
 On iPhone, the owner installs the app on the Home Screen and enables notifications with a button in
-the sidebar. Permission is requested only after that action. Locking the app unsubscribes that
-browser; disabling notifications does the same without locking it.
+the sidebar. Permission is requested only after that action. Disabling notifications
+unsubscribes that browser.
 
 Only a new question created through the `ask` MCP tool or a credential request through
 `request_sops_secret` can produce a push notification.

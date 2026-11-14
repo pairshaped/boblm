@@ -434,7 +434,7 @@ test("Pi models form their own group and offer only their supported efforts", as
   dom.window.close();
 });
 
-test("Lock asks for confirmation before changing authentication", async () => {
+test("the app has no Lock button in the sidebar or the usage modal", async () => {
   const { dom, handle } = await mounted(initial("fixture-token"));
   try {
     const document = dom.window.document;
@@ -444,18 +444,14 @@ test("Lock asks for confirmation before changing authentication", async () => {
     );
     document.querySelector<HTMLButtonElement>("#open-account-usage")!.click();
     await handle.settle();
-    const lock = [
-      ...document.querySelectorAll<HTMLButtonElement>(
-        "#account-usage-dialog button",
-      ),
-    ].find((button) => button.textContent === "Lock")!;
-    lock.click();
-    await handle.settle();
     assert.equal(
-      dom.window.document.querySelector('input[name="token"]'),
-      null,
+      [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          "#account-usage-dialog button",
+        ),
+      ].find((button) => button.textContent === "Lock"),
+      undefined,
     );
-    assert.deepEqual(handle.effects().at(-1)?.effect, { type: "confirmLock" });
   } finally {
     handle.stop();
     dom.window.close();

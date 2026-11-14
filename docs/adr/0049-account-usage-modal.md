@@ -4,9 +4,8 @@ A clock button in the sidebar header (shown when the browser has a token) opens 
 Account usage modal. It replaces the sidebar Lock icon. The modal follows the
 Questions modal pattern (ADR 0033): backdrop, `role="dialog"`, `aria-modal`, Escape
 and Close dismiss it, Tab stays inside it, and focus returns to the clock button.
-It is at most 36rem wide and fills the screen on phones. It has a fixed header, a scrolling
-middle, and a fixed footer holding Lock. Its backdrop sits above the phone sidebar drawer,
-which is where the clock lives.
+It is at most 36rem wide and fills the screen on phones. It has a fixed header and a scrolling
+middle. Its backdrop sits above the phone sidebar drawer, which is where the clock lives.
 
 The `accountUsage` command (owner-authenticated, empty request) returns one entry per
 account: `label`, `kind` (`plan` or `api`), `provider`, and the stored five-hour,
@@ -40,8 +39,7 @@ reports a positive balance, as a unit-less number with up to two fraction digits
 states no currency). API accounts read "Allowance is not reported for API
 accounts." and an account with no readings reads "No readings yet."
 
-## Lock
+## No lock control
 
-The sidebar no longer has a Lock icon. A quiet Lock button in the modal's fixed footer
-starts the same confirmation flow as before; confirming disconnects this browser and
-needs the server token to reconnect.
+The app has no Lock control. The sidebar clock replaced the Lock icon and the modal does not
+restore it. A browser keeps its token until the owner clears it in the browser.

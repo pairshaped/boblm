@@ -390,15 +390,6 @@ const run = async (dispatch: (msg: Msg) => void, effect: Effect) => {
       dispatch({ type: "renameProject", projectId: effect.projectId, name });
     return;
   }
-  if (effect.type === "confirmLock") {
-    if (
-      window.confirm(
-        "Lock BobLM? You'll need to enter your token again in this browser. Running chats will continue.",
-      )
-    )
-      dispatch({ type: "logout" });
-    return;
-  }
   if (effect.type === "directoryFocus") {
     // Effects run before the view flush; focus after the dialog has been drawn.
     requestAnimationFrame(() =>

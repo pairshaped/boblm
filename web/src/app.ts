@@ -270,7 +270,6 @@ export type Msg =
       outcome: CommandOutcome<ChatList>;
     }
   | { type: "logout" }
-  | { type: "requestLock" }
   | {
       type: "list";
       sessions: ReadonlyArray<SessionInfo>;
@@ -431,7 +430,6 @@ export type Effect =
       name: string;
       chats: number;
     }
-  | { type: "confirmLock" }
   | { type: "directoryFocus"; open: boolean }
   | { type: "persistUncertain"; uncertain: Readonly<Record<string, Sent>> }
   | {
@@ -834,8 +832,6 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
       return [model, [{ type: "toggleFullscreen" }]];
     case "fullscreenChanged":
       return [{ ...model, fullscreen: msg.active }, []];
-    case "requestLock":
-      return model.token ? [model, [{ type: "confirmLock" }]] : [model, []];
     case "logout":
       return [
         // Locking disconnects; it must not throw away the draft or its finished uploads.
@@ -5919,19 +5915,6 @@ function accountUsageDialog(model: Model) {
         ),
       ),
       accountUsageContent(model),
-      h(
-        "footer",
-        {},
-        h(
-          "button",
-          {
-            type: "button",
-            class: "quiet",
-            onClick: on.clicked({ type: "requestLock" }),
-          },
-          "Lock",
-        ),
-      ),
     ),
   );
 }

@@ -81,10 +81,8 @@ jump directly to the latest messages and follow them again.
 
 The clock button above the project list opens Account usage: the allowance
 remaining for each account, with reset times and how old each reading is. It
-loads fresh readings each time you open it. The quiet Lock button at the bottom
-of that window disconnects this browser after confirmation. You'll need the
-server token to reconnect. Agents keep working on the server while the browser
-is locked.
+loads fresh readings each time you open it. BobLM has no Lock button: a browser
+keeps its token until you clear the site's stored data.
 
 ## Reading long chats
 

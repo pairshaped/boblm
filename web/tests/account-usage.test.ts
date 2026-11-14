@@ -158,27 +158,6 @@ test("the modal shows remaining percentages, reset text, API and no-reading line
   }
 });
 
-test("Lock inside the modal starts the lock flow", async () => {
-  const { dom, handle } = await mounted(initial("t"));
-  const document = dom.window.document;
-  try {
-    document.querySelector<HTMLButtonElement>("#open-account-usage")!.click();
-    await handle.settle();
-    [
-      ...document.querySelectorAll<HTMLButtonElement>(
-        "#account-usage-dialog button",
-      ),
-    ]
-      .find((b) => b.textContent === "Lock")!
-      .click();
-    await handle.settle();
-    assert.ok(handle.effects().some((e) => e.effect.type === "confirmLock"));
-  } finally {
-    handle.stop();
-    dom.window.close();
-  }
-});
-
 test("a failed request shows the error and Try again requests again", () => {
   const [open] = update(initial("t"), { type: "openAccountUsage" });
   const [failed] = update(open, {
@@ -238,7 +217,7 @@ test("an expired window is unavailable, not a fresh allowance", async () => {
   }
 });
 
-test("Lock sits in a fixed footer outside the scrolling region, and the backdrop clears the sidebar", async () => {
+test("the backdrop clears the sidebar and the modal has no Lock button", async () => {
   const model: Model = {
     ...initial("t"),
     accountUsageOpen: true,
@@ -248,12 +227,14 @@ test("Lock sits in a fixed footer outside the scrolling region, and the backdrop
   try {
     const dialog = dom.window.document.querySelector("#account-usage-dialog")!;
     const scroller = dialog.querySelector(".account-usage")!;
-    const lock = [...dialog.querySelectorAll("button")].find(
-      (b) => b.textContent === "Lock",
-    )!;
-    assert.ok(!scroller.contains(lock));
-    assert.equal(lock.parentElement?.tagName, "FOOTER");
-    assert.equal(lock.parentElement?.parentElement, dialog);
+    assert.ok(scroller);
+    assert.equal(
+      [...dialog.querySelectorAll("button")].find(
+        (b) => b.textContent === "Lock",
+      ),
+      undefined,
+    );
+    assert.equal(dialog.querySelector("footer"), null);
     assert.ok(
       dialog.parentElement!.classList.contains("account-usage-backdrop"),
     );
