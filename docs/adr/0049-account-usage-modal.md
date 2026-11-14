@@ -4,7 +4,8 @@ A clock button in the sidebar header (shown when the browser has a token) opens 
 Account usage modal. It replaces the sidebar Lock icon. The modal follows the
 Questions modal pattern (ADR 0033): backdrop, `role="dialog"`, `aria-modal`, Escape
 and Close dismiss it, Tab stays inside it, and focus returns to the clock button.
-It is at most 36rem wide and fills the screen on phones. It has a fixed header and a scrolling
+It is at most 46rem wide and fills the screen on phones. Each account is a card in a
+two-column grid (one column on phones); the error and loading lines span both columns. It has a fixed header and a scrolling
 middle. Its backdrop sits above the phone sidebar drawer, which is where the clock lives.
 
 The `accountUsage` command (owner-authenticated, empty request) returns one entry per
@@ -17,8 +18,8 @@ error with Try again; loading shows a status line.
 
 ## Accounts
 
-Entries appear in this order: Codex plan, Claude plan A, Claude plan B (when
-enabled), OpenAI API, Claude API A, Claude API B (when enabled). Enabled Claude
+Entries appear in this order: Claude plan A, Claude plan B (when enabled), Codex plan,
+OpenAI API, Claude API A, Claude API B (when enabled). Enabled Claude
 accounts come from the server's enabled-account configuration, the same one chat
 creation and role routing use.
 
@@ -29,9 +30,10 @@ creation and role routing use.
 
 ## Display
 
-Plan accounts show a five-hour bar (only when reported) and a weekly bar as percent
-remaining (100 minus used), with "Resets in 2d 4h", the local reset date and time, and
-the age of the reading ("as of 3m ago"). Low remaining is the warning state, at the
+Plan accounts show one weekly bar as percent remaining (100 minus used), with "Resets in
+2d 4h", the local reset date and time, and the age of the reading ("as of 3m ago"). The
+five-hour window is not shown, because only the weekly allowance matters on these top
+plans; the command still carries the five-hour reading. Low remaining is the warning state, at the
 same threshold as the composer meters. A window whose reset time has passed shows no
 percentage and "This window has reset. Waiting for a new reading.", matching ADR 0037:
 an expired allowance is never shown as a fresh one. Credits show only when the account

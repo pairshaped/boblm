@@ -84,12 +84,10 @@ function account(info: AccountUsageInfo, now: number) {
   const body =
     info.kind === "api"
       ? h("p", {}, "Allowance is not reported for API accounts.")
-      : !info.fiveHour && !info.weekly && !info.credits
+      : !info.weekly && !info.credits
         ? h("p", {}, "No readings yet.")
         : [
-            info.fiveHour
-              ? allowance("Five-hour", false, info.fiveHour, now)
-              : null,
+            // The five-hour window is not shown: these are top plans, so only the weekly one matters.
             allowance("Weekly", true, info.weekly, now),
             credits != null && Number.isFinite(credits) && credits > 0
               ? h(

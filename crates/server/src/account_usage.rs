@@ -46,12 +46,8 @@ pub async fn list(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<Accoun
                     && session.account_id.is_some()
             })
             .and_then(|session| session.account_id.clone());
-        let mut accounts = vec![entry(
-            "Codex plan",
-            "plan",
-            "codex",
-            usage_of("codex", codex_id),
-        )];
+        // Claude plans come first, then the Codex plan, then the API accounts.
+        let mut accounts = Vec::new();
         for (key, label) in [
             (CLAUDE_ACCOUNT_KEY_PLAN_A, "Claude plan A"),
             (CLAUDE_ACCOUNT_KEY_PLAN_B, "Claude plan B"),
@@ -61,6 +57,12 @@ pub async fn list(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<Accoun
                 accounts.push(entry(label, "plan", "claude", usage_of("claude", id)));
             }
         }
+        accounts.push(entry(
+            "Codex plan",
+            "plan",
+            "codex",
+            usage_of("codex", codex_id),
+        ));
         accounts.push(api("OpenAI API", "codex"));
         for (key, label) in [
             (CLAUDE_ACCOUNT_KEY_API_A, "Claude API A"),

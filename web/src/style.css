@@ -1613,7 +1613,7 @@ pre {
 }
 
 .dialog.account-usage-dialog {
-  width: min(36rem, calc(100vw - 2rem));
+  width: min(46rem, calc(100vw - 2rem));
   max-height: calc(100dvh - 2rem);
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
@@ -1628,13 +1628,26 @@ pre {
   align-items: center;
 }
 .account-usage {
+  /* The dialog already pads its content; .subagents-body would add 16px more. */
+  padding: 0;
   overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+/* The error and loading lines span both columns; each account is a card. */
+.account-usage > :not(.account-usage-account) {
+  grid-column: 1 / -1;
 }
 .account-usage-account {
   display: grid;
+  align-content: start;
   gap: 8px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--color-border);
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-sidebar-bg);
 }
 .account-usage-account h3,
 .account-usage-account p {
@@ -1642,6 +1655,13 @@ pre {
 }
 .account-usage .usage-meter {
   width: 100%;
+}
+.account-usage .usage-credits {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
 }
 .account-window {
   display: grid;
@@ -1660,5 +1680,8 @@ pre {
     height: 100dvh;
     max-height: none;
     border-radius: 0;
+  }
+  .account-usage {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

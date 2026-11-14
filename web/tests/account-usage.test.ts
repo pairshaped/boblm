@@ -143,8 +143,9 @@ test("the modal shows remaining percentages, reset text, API and no-reading line
     await handle.settle();
     const text = document.querySelector("#account-usage-dialog")!.textContent!;
     assert.match(text, /Codex plan/);
-    assert.match(text, /75%/);
     assert.match(text, /60%/);
+    assert.ok(!/75%/.test(text), "the five-hour window is not shown");
+    assert.ok(!/Five-hour/.test(text));
     assert.match(text, /Resets in 2d 4h, /);
     assert.match(text, /as of 3m ago/);
     assert.ok(!/\.,/.test(text));
@@ -198,8 +199,8 @@ test("an expired window is unavailable, not a fresh allowance", async () => {
     accountUsage: [
       {
         ...accounts[0]!,
-        fiveHour: { usedPercent: 90, resetsAt: now - 10, observedAt: 1 },
-        weekly: null,
+        fiveHour: null,
+        weekly: { usedPercent: 90, resetsAt: now - 10, observedAt: 1 },
         credits: null,
       },
     ],

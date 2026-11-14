@@ -3041,9 +3041,9 @@ async fn account_usage_command_lists_labeled_enabled_accounts_without_secrets() 
     };
     assert_eq!(
         labels(&reply),
-        ["Codex plan", "Claude plan A", "OpenAI API", "Claude API A"]
+        ["Claude plan A", "Codex plan", "OpenAI API", "Claude API A"]
     );
-    let codex = &reply["accounts"][0];
+    let codex = &reply["accounts"][1];
     assert_eq!(codex["kind"], "plan");
     assert_eq!(codex["fiveHour"]["usedPercent"], 10.0);
     assert_eq!(codex["credits"]["balance"], 500.0);
@@ -3063,15 +3063,15 @@ async fn account_usage_command_lists_labeled_enabled_accounts_without_secrets() 
     assert_eq!(
         labels(&reply),
         [
-            "Codex plan",
             "Claude plan A",
             "Claude plan B",
+            "Codex plan",
             "OpenAI API",
             "Claude API A",
             "Claude API B"
         ]
     );
-    assert_eq!(reply["accounts"][2]["weekly"]["usedPercent"], 30.0);
+    assert_eq!(reply["accounts"][1]["weekly"]["usedPercent"], 30.0);
     let text = reply.to_string();
     assert!(!text.contains("secret-"), "{text}");
     assert!(!text.contains("accountId"), "{text}");
