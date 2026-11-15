@@ -45,6 +45,10 @@ pub const ACK_DEADLINE_DURING_COMPACTION: Duration = Duration::from_secs(300);
 /// Account A's monthly Claude Platform API credit grant day (UTC), independent of billing.
 /// Account B shares this day until the owner links it and confirms its grant day.
 pub const ANTHROPIC_API_CREDIT_RESET_DAY: u32 = 27;
+/// Maximum recent command completions retained by a Codex driver.
+pub const BACKGROUND_COMPLETION_LIMIT: usize = 64;
+/// Longest a command completion remains available for an inventory notice.
+pub const BACKGROUND_COMPLETION_MAX_AGE: Duration = Duration::from_secs(60 * 60);
 /// Maximum combined threads and background jobs collected in a single snapshot.
 pub const BACKGROUND_JOB_SCAN_LIMIT: usize = 4096;
 /// How often existing agent children are queried for background work.

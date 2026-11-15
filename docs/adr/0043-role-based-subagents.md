@@ -25,12 +25,14 @@ agent guidance, not a server check: BobLM cannot determine who requested it.
 Implementers take a difficulty of `simple` or `hard`. Default to `simple` (medium
 effort). Use `hard` only when the task is clearly complex: concurrency, delivery
 or state-machine logic, payments, auth or credentials, risky migrations, or subtle
-cross-module design. The routing order is:
-
-1. Sol on the Codex plan allowance, medium or high.
-2. Sonnet on a Claude plan, medium or high, until the account reaches the 2% cutoff.
-   There is no reserve: Sonnet only runs once Sol is used up, so it may drain Claude
-   to the cutoff (ADR 0047).
+cross-module design. Choose the available plan whose weekly allowance resets first,
+regardless of provider: Sol on the Codex plan or Sonnet on a Claude plan, at medium
+or high effort. Claude accounts retain their 2% cutoff and per-account caps (ADR
+0047). Compare Codex with the eligible account selected by Claude's reset-first
+selection. Known future resets sort before unknown or expired readings. Ties and
+unknowns retain table order: Codex before Claude, and Claude A before B.
+Unavailable steps fall through to the next choice. The route reason reports the
+reset comparison and any availability rejection.
 
 Reviewers take no difficulty. A step is skipped for any reason (spent money, headroom,
 caps, disabled, not configured):

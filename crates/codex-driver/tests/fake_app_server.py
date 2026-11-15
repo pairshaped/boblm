@@ -16,6 +16,7 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "schema
     SURFACE = json.load(f)["requests"]
 state = {"thread": None, "turn": None, "queue": []}
 requests_seen = []
+completions_sent = set()
 if "FAKE_LOG" in os.environ:
     with open(os.environ["FAKE_LOG"], "a") as log:
         log.write("codex_home=%s\n" % os.environ.get("CODEX_HOME", ""))
@@ -138,6 +139,11 @@ def handle(message):
                 jobs = json.load(fixture)
         except (KeyError, OSError, ValueError):
             return fail(rid, -32601, "inventory unavailable")
+        for completion in jobs.get("completions", []):
+            key = (completion["threadId"], completion["item"]["id"])
+            if key not in completions_sent:
+                completions_sent.add(key)
+                notify("item/completed", completion)
         if method == "thread/loaded/list":
             if params.get("cursor") is None:
                 reply(rid, {"data": [state["thread"]], "nextCursor":"children"})

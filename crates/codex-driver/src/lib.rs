@@ -66,6 +66,7 @@ struct Shared {
     settings: Mutex<Settings>,
     /// The /compact command waiting for Codex to announce the compaction itself.
     compacting: Mutex<Option<String>>,
+    completions: Mutex<background::Completions>,
 }
 
 impl Shared {
@@ -193,6 +194,7 @@ impl CodexSession {
             turn: Mutex::new(None),
             usage_gate: Mutex::new(None),
             compacting: Mutex::new(None),
+            completions: Mutex::default(),
             settings: Mutex::new(Settings {
                 model: options.model.to_owned(),
                 effort: options.effort.map(str::to_owned),
@@ -242,6 +244,18 @@ impl CodexSession {
                 ),
             )),
         }
+    }
+
+    /// Best observed completion, without waiting for a notification or changing delivery.
+    pub fn background_job_completion(
+        &self,
+        id: &str,
+    ) -> Option<boblm_protocol::jobs::JobCompletion> {
+        self.shared
+            .completions
+            .lock()
+            .expect("completions lock")
+            .get(id, background::now())
     }
 
     pub fn enable_background_reporting(&mut self) {
@@ -835,6 +849,11 @@ async fn read_loop(
             }
             (None, Some(method)) => {
                 let params = &message["params"];
+                shared
+                    .completions
+                    .lock()
+                    .expect("completions lock")
+                    .observe(method, params, background::now());
                 if params["threadId"].as_str().is_some_and(|thread| {
                     Some(thread) != shared.thread.lock().expect("thread lock").as_deref()
                 }) {

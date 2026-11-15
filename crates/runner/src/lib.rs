@@ -1776,12 +1776,13 @@ impl Actor {
                         .cloned()
                         .collect();
                     for job in finished {
-                        // Inventory removal proves only that the provider no longer
-                        // lists the command. Its exit status and output need checking.
-                        let mut content = format!(
-                            "Background command is no longer listed as running: {}\nJob: {}\nCheck its output and exit status, then continue your work.",
-                            job.command, job.id
-                        );
+                        let completion = self
+                            .driver
+                            .as_ref()
+                            .and_then(|driver| driver.background_job_completion(&job.id));
+                        let reviewer = self.session().await?.role.as_deref() == Some("reviewer");
+                        let mut content =
+                            background_completion_notice(&job, completion.as_ref(), reviewer);
                         if content.len() > boblm_tuning::MAX_MESSAGE_BYTES {
                             let mut end = boblm_tuning::MAX_MESSAGE_BYTES;
                             while !content.is_char_boundary(end) {
@@ -2177,6 +2178,58 @@ fn stale_cutoff() -> i64 {
     now() - boblm_tuning::QUEUED_MESSAGE_MAX_AGE.as_millis() as i64
 }
 
+fn background_completion_notice(
+    job: &boblm_protocol::jobs::BackgroundJob,
+    completion: Option<&boblm_protocol::jobs::JobCompletion>,
+    reviewer: bool,
+) -> String {
+    let mut content = format!(
+        "Background command is no longer listed as running: {}\nJob: {}\nCheck its output and exit status, then continue your work.",
+        job.command, job.id
+    );
+    if let Some(completion) = completion {
+        let outcome = match completion.exit_code {
+            Some(0) => "completed successfully (exit code 0)".to_owned(),
+            Some(code) => {
+                let signal = match code {
+                    129 => Some("SIGHUP"),
+                    130 => Some("SIGINT"),
+                    131 => Some("SIGQUIT"),
+                    134 => Some("SIGABRT"),
+                    137 => Some("SIGKILL"),
+                    139 => Some("SIGSEGV"),
+                    141 => Some("SIGPIPE"),
+                    143 => Some("SIGTERM"),
+                    _ => None,
+                };
+                let status = if completion.status == "failed" {
+                    "failed with"
+                } else {
+                    "ended with"
+                };
+                let mut text = format!("{status} exit code {code}");
+                if let Some(signal) = signal {
+                    text.push_str(&format!(" (terminated by {signal})"));
+                }
+                text
+            }
+            None => format!("ended with status {}", completion.status),
+        };
+        let seconds = completion
+            .reported_at
+            .div_euclid(1000)
+            .rem_euclid(24 * 60 * 60);
+        let reporter = if reviewer { "The command" } else { "Codex" };
+        content.push_str(&format!(
+            "\n{reporter} reported it {outcome} at {:02}:{:02}:{:02} UTC.",
+            seconds / 3600,
+            seconds / 60 % 60,
+            seconds % 60
+        ));
+    }
+    content
+}
+
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2187,6 +2240,53 @@ fn now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_completion_notice_maps_common_signals_and_uses_utc_time() {
+        use boblm_protocol::jobs::{BackgroundJob, JobCompletion};
+        let job = BackgroundJob {
+            id: "thread:1".into(),
+            command: "tests".into(),
+            agent_key: None,
+        };
+        for (code, signal) in [
+            (129, "SIGHUP"),
+            (130, "SIGINT"),
+            (131, "SIGQUIT"),
+            (134, "SIGABRT"),
+            (137, "SIGKILL"),
+            (139, "SIGSEGV"),
+            (141, "SIGPIPE"),
+            (143, "SIGTERM"),
+        ] {
+            let completion = JobCompletion {
+                exit_code: Some(code),
+                status: "failed".into(),
+                reported_at: 86_400_000 + (15 * 3600 + 19 * 60 + 48) * 1000 + 803,
+            };
+            let text = background_completion_notice(&job, Some(&completion), false);
+            assert!(
+                text.contains(&format!(
+                    "failed with exit code {code} (terminated by {signal}) at 15:19:48 UTC."
+                )),
+                "{text}"
+            );
+        }
+        for code in [1, 128, 144, 255] {
+            let completion = JobCompletion {
+                exit_code: Some(code),
+                status: "completed".into(),
+                reported_at: 0,
+            };
+            let text = background_completion_notice(&job, Some(&completion), false);
+            assert!(
+                text.ends_with(&format!(
+                    "Codex reported it ended with exit code {code} at 00:00:00 UTC."
+                )),
+                "{text}"
+            );
+        }
+    }
 
     #[test]
     fn usage_poll_gate_skips_only_a_fresh_account_confirmation() {

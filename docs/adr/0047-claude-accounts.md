@@ -36,6 +36,10 @@ Missing readings and expired reset windows count as available for routing,
 consistent with ADR 0043; the meters continue to report unavailable data.
 Expired samples do not become invented zero-usage observations.
 
+Implementers compare the selected Claude account with the Codex plan and use the
+available step with the earliest known future weekly reset (ADR 0043). Ties and
+unknown or expired readings retain Codex-first table order.
+
 The Sonnet implementer step has no reserve. It uses only the 2% cutoff, with one
 plan account or several.
 Each plan and API account has its own open-chat and reviewer caps (ADR 0043).

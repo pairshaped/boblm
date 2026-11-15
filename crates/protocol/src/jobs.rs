@@ -18,3 +18,12 @@ pub struct JobSnapshot {
     /// False retains the last known jobs but cannot establish that restart is safe.
     pub available: bool,
 }
+
+/// Completion observed by a driver, for inventory disappearance notices only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobCompletion {
+    pub exit_code: Option<i64>,
+    pub status: String,
+    /// UTC milliseconds when the driver received the completion notification.
+    pub reported_at: i64,
+}

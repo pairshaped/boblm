@@ -685,6 +685,83 @@ async fn background_jobs_survive_turn_completion_and_inventory_failures() {
 }
 
 #[tokio::test]
+async fn background_completions_are_cached_before_inventory_removal_including_children() {
+    use serde_json::json;
+    for (code, parsed) in [
+        (json!("143"), Some(143)),
+        (json!(0), Some(0)),
+        (json!(1), Some(1)),
+        (json!(144), Some(144)),
+        (json!(null), None),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("jobs.json");
+        std::fs::write(&path, r#"{"parent":[{"processId":"77614","command":"tests"}],"child":[{"processId":"82064","command":"child tests"}]}"#).unwrap();
+        let mut session = CodexSession::spawn_command(
+            fake(&[("FAKE_JOBS", path.to_str().unwrap())]),
+            options(None),
+        )
+        .await
+        .unwrap();
+        let Event::System {
+            session_id: Some(thread),
+            ..
+        } = next(&mut session).await
+        else {
+            panic!("thread init")
+        };
+        session.enable_background_reporting();
+        loop {
+            if let Event::BackgroundJobs { snapshot } = next(&mut session).await {
+                assert_eq!(snapshot.tasks.len(), 2);
+                break;
+            }
+        }
+        let since = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let mut parent_item = json!({"type":"CommandExecution", "id":"parent-end",
+            "source":"unified_exec_startup", "process_id":"77614", "status":"failed"});
+        if !code.is_null() {
+            parent_item["exit_code"] = code.clone();
+        }
+        let status = if parsed == Some(0) {
+            "completed"
+        } else {
+            "failed"
+        };
+        parent_item["status"] = json!(status);
+        std::fs::write(&path, json!({"completions":[
+            {"threadId":thread, "item":parent_item},
+            {"threadId":"child-thread", "item":{"type":"commandExecution", "id":"child-end",
+                "source":"unifiedExecStartup", "processId":"82064", "status":status, "exitCode":code}}
+        ]}).to_string()).unwrap();
+        loop {
+            if let Event::BackgroundJobs { snapshot } = next(&mut session).await {
+                assert!(snapshot.available);
+                assert!(snapshot.tasks.is_empty());
+                break;
+            }
+        }
+        for id in [format!("{thread}:77614"), "child-thread:82064".into()] {
+            let completion = session
+                .background_job_completion(&id)
+                .expect("observed completion");
+            assert_eq!(completion.exit_code, parsed);
+            assert_eq!(completion.status, status);
+            let until = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            assert!((since..=until).contains(&completion.reported_at));
+        }
+        assert!(session.background_job_completion("unknown").is_none());
+        session.stop().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn stale_steering_refreshes_the_current_turn_and_delivers_once() {
     let mut session = start().await;
     next(&mut session).await;

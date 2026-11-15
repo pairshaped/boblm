@@ -193,6 +193,16 @@ pub fn resolve_route(
                 AccountKind::ClaudeApi => api,
                 _ => None,
             };
+            if role == Role::Implementer
+                && let Some(account) = plan
+            {
+                let label = if account.key == boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_B {
+                    "Claude plan B"
+                } else {
+                    "Claude plan A"
+                };
+                route.reason = route.reason.replace("Claude plan", label);
+            }
             Ok(route)
         }
         RouteOutcome::Exhausted(rejections) => {

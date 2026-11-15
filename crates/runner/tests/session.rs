@@ -21,7 +21,11 @@ struct Input {
     model: String,
     effort: Option<String>,
 }
+type Completions =
+    Arc<Mutex<std::collections::HashMap<String, boblm_protocol::jobs::JobCompletion>>>;
+
 struct Fake {
+    completions: Completions,
     model: String,
     effort: Option<String>,
     wait_for_tool_boundary: bool,
@@ -34,6 +38,9 @@ struct Fake {
 }
 #[async_trait]
 impl Driver for Fake {
+    fn background_job_completion(&self, id: &str) -> Option<boblm_protocol::jobs::JobCompletion> {
+        self.completions.lock().unwrap().get(id).cloned()
+    }
     fn wakes_itself_on_background_job_completion(&self) -> bool {
         self.wakes_itself_on_background_job_completion
     }
@@ -125,6 +132,7 @@ impl DriverFactory for Factory {
     }
 }
 struct Harness {
+    completions: Completions,
     manual_stop: Arc<AtomicBool>,
     interrupts: Arc<AtomicUsize>,
     _temp: tempfile::TempDir,
@@ -246,15 +254,18 @@ impl Harness {
     ) -> Self {
         let (events, event_rx) = mpsc::unbounded_channel();
         let (input_tx, inputs) = mpsc::unbounded_channel();
+        let completions = Completions::default();
         let manual_stop = Arc::new(AtomicBool::new(false));
         let interrupts = Arc::new(AtomicUsize::new(0));
         Self {
+            completions: completions.clone(),
             manual_stop: manual_stop.clone(),
             interrupts: interrupts.clone(),
             _temp: temp,
             store,
             factory: Arc::new(Factory {
                 fake: Mutex::new(Some(Fake {
+                    completions,
                     model: "sonnet".into(),
                     effort: None,
                     wait_for_tool_boundary: matches!(agent, "pi" | "codex"),
@@ -2373,7 +2384,10 @@ async fn background_job_completion_wakes_idle_parent_once() {
     assert_eq!(wake.priority, None);
     assert!(wake.content.contains("cargo test"));
     assert!(wake.content.contains("no longer listed as running"));
-    assert!(!wake.content.contains("succeeded"));
+    assert_eq!(
+        wake.content,
+        "Background command is no longer listed as running: cargo test\nJob: thread:123\nCheck its output and exit status, then continue your work."
+    );
     h.lifecycle(&wake.uuid, LifecycleState::Started);
     h.result();
     h.events.send(empty).unwrap();
@@ -2390,6 +2404,114 @@ async fn background_job_completion_wakes_idle_parent_once() {
         "started"
     );
     runner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn background_job_completion_notice_uses_available_details_and_hides_reviewer_provider() {
+    use boblm_protocol::jobs::{BackgroundJob, JobCompletion, JobSnapshot};
+    for reviewer in [false, true] {
+        for (code, status, expected) in [
+            (
+                Some(143),
+                "failed",
+                "failed with exit code 143 (terminated by SIGTERM)",
+            ),
+            (Some(0), "completed", "completed successfully (exit code 0)"),
+            (Some(1), "failed", "failed with exit code 1"),
+            (Some(144), "failed", "failed with exit code 144"),
+            (None, "failed", "ended with status failed"),
+        ] {
+            let mut h = if reviewer {
+                Harness::new_role("codex", None, "reviewer-openai-api")
+            } else {
+                Harness::new_with_agent("codex")
+            };
+            let runner = h.start().await;
+            let client = runner.handle();
+            if reviewer {
+                client.resume().await.unwrap();
+            } else {
+                client.send(A, "start tests").await.unwrap();
+            }
+            let work = h.input().await;
+            h.lifecycle(&work.uuid, LifecycleState::Started);
+            h.events
+                .send(Event::BackgroundJobs {
+                    snapshot: JobSnapshot {
+                        available: true,
+                        tasks: vec![
+                            BackgroundJob {
+                                id: "thread:77614".into(),
+                                command: "parent tests".into(),
+                                agent_key: None,
+                            },
+                            BackgroundJob {
+                                id: "child:82064".into(),
+                                command: "child tests".into(),
+                                agent_key: Some("child".into()),
+                            },
+                        ],
+                    },
+                })
+                .unwrap();
+            h.result();
+            wait_status(&client, |s| {
+                !s.turn_active
+                    && s.dispatching == 0
+                    && s.jobs.as_ref().is_some_and(|j| j.tasks.len() == 2)
+            })
+            .await;
+            for id in ["thread:77614", "child:82064"] {
+                h.completions.lock().unwrap().insert(
+                    id.into(),
+                    JobCompletion {
+                        exit_code: code,
+                        status: status.into(),
+                        reported_at: (15 * 3600 + 19 * 60 + 48) * 1000 + 800,
+                    },
+                );
+            }
+            let empty = Event::BackgroundJobs {
+                snapshot: JobSnapshot {
+                    available: true,
+                    tasks: vec![],
+                },
+            };
+            h.events.send(empty.clone()).unwrap();
+            let wake = h.input().await;
+            assert!(
+                wake.content
+                    .contains("no longer listed as running: parent tests")
+            );
+            assert!(wake.content.contains(expected), "{}", wake.content);
+            assert!(wake.content.contains("at 15:19:48 UTC."));
+            assert!(
+                wake.content
+                    .contains("Check its output and exit status, then continue your work.")
+            );
+            assert!(
+                !wake.content.contains("child tests"),
+                "child keeps its own completion path"
+            );
+            if reviewer {
+                assert!(wake.content.contains("The command reported"));
+                for name in ["codex", "openai", "claude", "anthropic", "deepseek", "luna"] {
+                    assert!(!wake.content.to_lowercase().contains(name));
+                }
+            } else {
+                assert!(wake.content.contains("Codex reported"));
+            }
+            h.lifecycle(&wake.uuid, LifecycleState::Started);
+            h.result();
+            h.events.send(empty).unwrap();
+            wait_status(&client, |s| !s.turn_active && s.dispatching == 0).await;
+            assert!(
+                h.inputs.try_recv().is_err(),
+                "duplicate snapshots and child removal cannot queue extra notices"
+            );
+            runner.shutdown().await.unwrap();
+        }
+    }
 }
 
 #[tokio::test]
@@ -2500,9 +2622,21 @@ async fn background_job_completion_respects_stop_until_owner_resumes() {
     assert!(status.queue_held);
     assert!(!status.turn_active);
     assert!(h.inputs.try_recv().is_err());
+    // A completion arriving after acceptance cannot rewrite the queued notice.
+    h.completions.lock().unwrap().insert(
+        "job".into(),
+        boblm_protocol::jobs::JobCompletion {
+            exit_code: Some(143),
+            status: "failed".into(),
+            reported_at: 0,
+        },
+    );
     client.resume().await.unwrap();
     let wake = h.input().await;
-    assert!(wake.content.contains("no longer listed as running"));
+    assert_eq!(
+        wake.content,
+        "Background command is no longer listed as running: tests\nJob: job\nCheck its output and exit status, then continue your work."
+    );
     h.lifecycle(&wake.uuid, LifecycleState::Started);
     h.result();
     wait_status(&client, |s| !s.turn_active && s.dispatching == 0).await;

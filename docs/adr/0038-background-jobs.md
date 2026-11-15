@@ -47,6 +47,12 @@ mid-turn chat. It asks the agent to check the output and exit status: disappeara
 alone does not prove success. Child-owned commands use the child's completion
 path rather than sending extra parent notifications.
 
+Codex retains a bounded cache of observed command completions keyed by thread and
+process ID. When an inventory diff queues a notice, it includes any cached exit
+status and the UTC time BobLM received the completion. Reviewer notices omit the
+provider name. Without a completion record, the notice keeps its generic wording;
+BobLM neither waits for a record nor rewrites a queued notice when one arrives.
+
 Failed scans retain the last known tasks. Duplicate snapshots produce no extra
 messages. The wake is persisted before dispatch and uses normal consumption
 acknowledgments. Stop, archive and uncertainty holds remain in force; queued

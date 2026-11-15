@@ -3079,3 +3079,98 @@ async fn account_usage_command_lists_labeled_enabled_accounts_without_secrets() 
     assert_ne!(status, StatusCode::OK);
     app.shutdown().await.unwrap();
 }
+
+#[test]
+fn implementer_routes_across_plan_resets() {
+    use boblm_tuning::{
+        AccountKind, CLAUDE_ACCOUNT_KEY_PLAN_A as A, CLAUDE_ACCOUNT_KEY_PLAN_B as B, Difficulty,
+        Role,
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    for (codex, a, b, a_used, exhaust_b, expected) in [
+        (1, 2, 3, 0.0, false, "codex-plan"),
+        (3, 1, 2, 0.0, false, A),
+        (3, 2, 1, 0.0, false, B),
+        (3, 1, 2, 98.0, false, B),
+        (3, 2, 1, 0.0, true, A),
+        (0, 1, 2, 0.0, false, A),
+        (1, 1, 2, 0.0, false, "codex-plan"),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(temp.path().join("reset-route.sqlite")).unwrap();
+        store.create_session("fixture-root", "/fake", 1).unwrap();
+        let project = store
+            .reader()
+            .unwrap()
+            .sessions()
+            .unwrap()
+            .into_iter()
+            .find(|s| s.id == "fixture-root")
+            .unwrap()
+            .project_id
+            .unwrap();
+        for (id, key, agent, reset, used) in [
+            ("codex", "codex-plan", "codex", codex, 0.0),
+            ("claude-a", A, "claude", a, a_used),
+            ("claude-b", B, "claude", b, 0.0),
+        ] {
+            store
+                .create_session_in(boblm_store::NewSession {
+                    name: id,
+                    id,
+                    project_id: &project,
+                    agent,
+                    model: "sonnet",
+                    effort: None,
+                    created_at: 1,
+                })
+                .unwrap();
+            store.set_claude_account_key(id, key).unwrap();
+            let account_id = if key == A {
+                boblm_claude_driver::account::account_id().unwrap_or_else(|| id.into())
+            } else {
+                id.into()
+            };
+            store.set_session_account(id, Some(&account_id)).unwrap();
+            store.record_event(id, "agent_event", serde_json::json!({"type":"usage","weekly":{"usedPercent":used,"resetsAt":now + reset * 86400}}), 2).unwrap();
+        }
+        if exhaust_b {
+            store
+                .exhaust_claude_account("claude-b", B, now + 86400, true)
+                .unwrap();
+        }
+        let route = boblm_server::role_spawn::resolve_route(
+            &store,
+            Role::Implementer,
+            Difficulty::Simple,
+            boblm_server::role_spawn::EnabledAccounts {
+                plan: &[A, B],
+                api: &[],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            boblm_server::role_spawn::account_key_for_route(&route),
+            Some(expected),
+            "{}",
+            route.reason
+        );
+        assert_eq!(
+            route.model,
+            if route.account == AccountKind::ClaudePlan {
+                boblm_tuning::MODEL_SONNET
+            } else {
+                boblm_tuning::MODEL_GPT_6_1_SOL
+            }
+        );
+        if expected == A {
+            assert!(route.reason.contains("Claude plan A"));
+        }
+        if expected == B {
+            assert!(route.reason.contains("Claude plan B"));
+        }
+    }
+}

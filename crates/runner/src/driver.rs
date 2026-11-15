@@ -31,6 +31,10 @@ pub trait Driver: Send + Sync {
     fn wakes_itself_on_background_job_completion(&self) -> bool {
         false
     }
+    /// Completion details available now; inventory diffs alone decide whether to notify.
+    fn background_job_completion(&self, _id: &str) -> Option<boblm_protocol::jobs::JobCompletion> {
+        None
+    }
     /// The driver skips its periodic usage poll while this returns true.
     fn set_usage_poll_gate(&mut self, _gate: Arc<dyn Fn() -> bool + Send + Sync>) {}
     async fn abort(&mut self) -> io::Result<()>;
@@ -168,6 +172,9 @@ impl Driver for ClaudeDriver {
 pub struct CodexDriver(pub Option<boblm_codex_driver::CodexSession>);
 #[async_trait]
 impl Driver for CodexDriver {
+    fn background_job_completion(&self, id: &str) -> Option<boblm_protocol::jobs::JobCompletion> {
+        self.0.as_ref()?.background_job_completion(id)
+    }
     fn steers_wait_for_tool_boundary(&self) -> bool {
         true
     }

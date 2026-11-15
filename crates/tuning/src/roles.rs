@@ -187,7 +187,8 @@ pub struct RoleStep {
     pub account: AccountKind,
 }
 
-/// Ordered implementer models and accounts.
+/// Implementer models and accounts, ordered by earliest known future weekly reset.
+/// This table order breaks ties and orders unknown or expired reset readings.
 pub const IMPLEMENTER_STEPS: &[RoleStep] = &[
     RoleStep {
         id: StepId::ImplementerCodexPlan,
@@ -701,7 +702,11 @@ fn resolve_core(
     ),
 ) -> RouteOutcome {
     let mut rejections = Vec::new();
-    for step in steps(role) {
+    let mut ordered: Vec<_> = steps(role).iter().collect();
+    if role == Role::Implementer {
+        ordered.sort_by_key(|step| future_reset(readings, step.account, now).unwrap_or(i64::MAX));
+    }
+    for step in ordered {
         let disabled = match step.id {
             StepId::ImplementerCodexPlan if !codex_enabled => Some("CODEX_PLAN_ROUTING_ENABLED"),
             StepId::ReviewerOpenAiApi if !openai_enabled => Some("OPENAI_API_ROUTING_ENABLED"),
@@ -773,6 +778,19 @@ fn resolve_core(
         };
         match reason {
             Ok(reason) => {
+                let reason = if role == Role::Implementer {
+                    format!(
+                        "{} {reason}",
+                        implementer_reset_reason(
+                            step.account,
+                            readings,
+                            now,
+                            rejections.is_empty()
+                        )
+                    )
+                } else {
+                    reason
+                };
                 let reason = rejections
                     .iter()
                     .map(|rejection| rejection.reason.as_str())
@@ -798,6 +816,50 @@ fn resolve_core(
         }
     }
     RouteOutcome::Exhausted(rejections)
+}
+
+fn future_reset(readings: &[AccountReading], account: AccountKind, now: i64) -> Option<i64> {
+    readings
+        .iter()
+        .find(|reading| reading.account == account)
+        .and_then(|reading| reading.weekly_resets_at)
+        .filter(|reset| *reset > now)
+}
+
+fn implementer_reset_reason(
+    chosen: AccountKind,
+    readings: &[AccountReading],
+    now: i64,
+    first: bool,
+) -> String {
+    let other = if chosen == AccountKind::CodexPlan {
+        AccountKind::ClaudePlan
+    } else {
+        AccountKind::CodexPlan
+    };
+    let describe = |account: AccountKind| match future_reset(readings, account, now) {
+        Some(reset) => {
+            let hours = reset.saturating_sub(now) / 3600;
+            format!(
+                "{} resets in {}d {}h",
+                account.label(),
+                hours / 24,
+                hours % 24
+            )
+        }
+        None => format!(
+            "{} has an unknown or expired reset reading",
+            account.label()
+        ),
+    };
+    let why = if !first {
+        "The earlier step is unavailable"
+    } else if future_reset(readings, chosen, now) == future_reset(readings, other, now) {
+        "Table order breaks the reset tie"
+    } else {
+        "The earliest known future reset takes priority"
+    };
+    format!("{}; {}. {why}.", describe(chosen), describe(other))
 }
 
 fn weekly_plan_reason(
@@ -851,6 +913,118 @@ mod tests {
             account,
             weekly_used_percent: used,
             weekly_resets_at: reset,
+        }
+    }
+
+    #[test]
+    fn implementer_reset_order_and_fallthrough() {
+        for (codex_reset, claude_reset, codex_used, claude_used, mark, expected) in [
+            (
+                Some(2000),
+                Some(3000),
+                0.0,
+                0.0,
+                None,
+                AccountKind::CodexPlan,
+            ),
+            (
+                Some(3000),
+                Some(2000),
+                0.0,
+                0.0,
+                None,
+                AccountKind::ClaudePlan,
+            ),
+            (
+                Some(3000),
+                Some(2000),
+                0.0,
+                98.0,
+                None,
+                AccountKind::CodexPlan,
+            ),
+            (
+                Some(2000),
+                Some(3000),
+                100.0,
+                0.0,
+                None,
+                AccountKind::ClaudePlan,
+            ),
+            (
+                Some(3000),
+                Some(2000),
+                0.0,
+                0.0,
+                Some(StepId::ImplementerClaude),
+                AccountKind::CodexPlan,
+            ),
+            (None, Some(2000), 0.0, 0.0, None, AccountKind::ClaudePlan),
+            (Some(2000), None, 0.0, 0.0, None, AccountKind::CodexPlan),
+            (
+                Some(1000),
+                Some(2000),
+                100.0,
+                0.0,
+                None,
+                AccountKind::ClaudePlan,
+            ),
+            (
+                Some(2000),
+                Some(1000),
+                0.0,
+                100.0,
+                None,
+                AccountKind::CodexPlan,
+            ),
+            (
+                Some(2000),
+                Some(2000),
+                0.0,
+                0.0,
+                None,
+                AccountKind::CodexPlan,
+            ),
+            (None, None, 0.0, 0.0, None, AccountKind::CodexPlan),
+        ] {
+            let readings = [
+                reading(AccountKind::CodexPlan, Some(codex_used), codex_reset),
+                reading(AccountKind::ClaudePlan, Some(claude_used), claude_reset),
+            ];
+            let marks: Vec<_> = mark
+                .into_iter()
+                .map(|step| ExhaustedStep { step, until: 4000 })
+                .collect();
+            let RouteOutcome::Chosen(route) = resolve(
+                Role::Implementer,
+                Difficulty::Simple,
+                &readings,
+                &marks,
+                ApiHeadroom::default(),
+                1000,
+            ) else {
+                panic!()
+            };
+            assert_eq!(route.account, expected, "{readings:?}");
+            assert!(route.reason.contains("reset"));
+            for (role, expected) in [
+                (Role::Reviewer, StepId::ReviewerOpenAiApi),
+                (Role::Planner, StepId::PlannerClaude),
+            ] {
+                if let RouteOutcome::Chosen(route) = resolve(
+                    role,
+                    Difficulty::Simple,
+                    &readings,
+                    &marks,
+                    ApiHeadroom::default(),
+                    1000,
+                ) {
+                    assert_eq!(route.step, expected);
+                } else {
+                    assert_eq!(role, Role::Planner);
+                    assert_eq!(claude_used, 98.0);
+                }
+            }
         }
     }
 
@@ -1091,7 +1265,7 @@ mod tests {
     }
 
     #[test]
-    fn implementers_use_the_codex_plan_then_claude_and_never_codex_credits() {
+    fn implementers_break_unknown_reset_ties_with_codex_and_never_use_credits() {
         let now = 1_000_000;
         let reset = now + 86_400;
         let routed = |readings: &[AccountReading]| {
