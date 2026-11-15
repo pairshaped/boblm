@@ -4,6 +4,7 @@
 //! it under the ID we gave it (see `translate`).
 pub mod account;
 mod background;
+pub mod kill_trace;
 mod translate;
 
 use boblm_protocol::{Event, LifecycleState, Priority};

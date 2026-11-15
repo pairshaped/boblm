@@ -138,6 +138,22 @@ pub const CODEX_DEVELOPER_INSTRUCTIONS: &str = CLAUDE_SYSTEM_PROMPT_APPEND;
 pub const CODEX_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 /// Extra arguments appended to every `codex app-server` launch.
 pub const CODEX_EXTRA_ARGS: &[&str] = &[];
+/// Fixed strace arguments for the optional Codex kill trace (ADR 0050). `--seccomp-bpf` needs
+/// `-f`, and it stops the tracee only for the listed system calls. The names are the ones
+/// strace 7.x accepts; it rejects `tgsigqueueinfo` without the `rt_` prefix.
+pub const CODEX_KILL_TRACE_ARGS: &[&str] = &[
+    "-f",
+    "--seccomp-bpf",
+    "-tt",
+    "-e",
+    "trace=kill,tkill,tgkill,rt_sigqueueinfo,rt_tgsigqueueinfo,pidfd_send_signal",
+];
+/// Kill trace log file name; `{session}` is the chat ID and `{seconds}` the Unix start time.
+pub const CODEX_KILL_TRACE_LOG_PATTERN: &str = "codex-kills-{session}-{seconds}.log";
+/// strace option that names the log file.
+pub const CODEX_KILL_TRACE_OUTPUT_OPTION: &str = "-o";
+/// Program that wraps `codex app-server` when the kill trace is on (looked up on PATH).
+pub const CODEX_KILL_TRACE_PROGRAM: &str = "strace";
 /// Codex feature flags boblm turns off so native multi-agent tools stay unavailable.
 pub const CODEX_MULTI_AGENT_FEATURES: &[&str] = &["multi_agent", "multi_agent_v2"];
 /// Whether role routing may use the Codex plan allowance and credits; explicit choices still work.

@@ -110,12 +110,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         tokio::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, config.port)).await?;
     let factory: Arc<dyn boblm_runner::DriverFactory> = if config.port == 0 {
         // Random-port instances cannot give surviving agents a stable MCP address.
-        Arc::new(boblm_server::mcp::AgentFactory::new(
-            format!("http://{}", listener.local_addr()?),
-            config.token.clone(),
-            runtime_dir,
-            uploads_dir,
-        ))
+        Arc::new(
+            boblm_server::mcp::AgentFactory::new(
+                format!("http://{}", listener.local_addr()?),
+                config.token.clone(),
+                runtime_dir,
+                uploads_dir,
+            )
+            .with_codex_kill_trace_dir(config.codex_kill_trace_dir.clone()),
+        )
     } else {
         Arc::new(PersistentFactory::new(path.clone())?)
     };

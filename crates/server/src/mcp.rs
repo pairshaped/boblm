@@ -1400,6 +1400,7 @@ pub struct AgentFactory {
     owner_token: String,
     runtime_dir: std::path::PathBuf,
     uploads_dir: std::path::PathBuf,
+    codex_kill_trace_dir: Option<std::path::PathBuf>,
 }
 impl AgentFactory {
     /// `runtime_dir` is private to this server. Agent MCP configs written by an
@@ -1422,7 +1423,13 @@ impl AgentFactory {
             owner_token,
             runtime_dir,
             uploads_dir,
+            codex_kill_trace_dir: None,
         }
+    }
+    /// Launch new Codex app-servers under strace, logging kill signals there (ADR 0050).
+    pub fn with_codex_kill_trace_dir(mut self, directory: Option<std::path::PathBuf>) -> Self {
+        self.codex_kill_trace_dir = directory;
+        self
     }
 }
 #[async_trait::async_trait]
@@ -1524,7 +1531,11 @@ impl boblm_runner::DriverFactory for AgentFactory {
             return Ok(Box::new(boblm_runner::PiDriver(Some(driver))));
         }
         if session.agent == "codex" {
-            let mut command = tokio::process::Command::new(boblm_tuning::CODEX_BINARY);
+            let mut command = boblm_codex_driver::kill_trace::command(
+                boblm_tuning::CODEX_BINARY,
+                self.codex_kill_trace_dir.as_deref(),
+                &session.id,
+            );
             command.env(boblm_tuning::SESSION_ID_ENV, &session.id);
             // Codex filters the environment its shell commands see, so set the ID there
             // explicitly. Session IDs are UUIDs, so the TOML string needs no escaping.

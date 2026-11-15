@@ -20,6 +20,9 @@ pub struct Config {
     pub web_root: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<crate::notifications::PushConfig>,
+    /// Absolute directory for Codex kill-signal traces (ADR 0050). Absent means off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_kill_trace_dir: Option<PathBuf>,
 }
 
 fn user_directory(variable: &str, fallback: &str) -> Result<PathBuf, Error> {
@@ -103,6 +106,7 @@ pub fn init(path: &Path) -> Result<Config, Error> {
         port: boblm_tuning::DEFAULT_PORT,
         web_root: None,
         notifications: None,
+        codex_kill_trace_dir: None,
     };
     let parent = path
         .parent()
@@ -177,4 +181,42 @@ pub fn tailscale_url(status: &serde_json::Value, port: u16) -> Option<String> {
                     .all(|b| b.is_ascii_alphanumeric() || b".-:".contains(&b)))
             .then(|| format!("https://{host}"))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(json: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("boblm.json");
+        std::fs::write(&path, json).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        (dir, path)
+    }
+    const BASE: &str = r#""token":"0123456789abcdef0123","database":"/tmp/x.sqlite","port":1"#;
+
+    #[test]
+    fn the_kill_trace_directory_is_read_when_present() {
+        let (_dir, path) = write(&format!(
+            r#"{{{BASE},"codexKillTraceDir":"/var/tmp/kills"}}"#
+        ));
+        let config = read(&path).unwrap();
+        assert_eq!(
+            config.codex_kill_trace_dir,
+            Some(PathBuf::from("/var/tmp/kills"))
+        );
+    }
+
+    #[test]
+    fn an_absent_kill_trace_directory_means_off_and_is_not_written_back() {
+        let (_dir, path) = write(&format!("{{{BASE}}}"));
+        let config = read(&path).unwrap();
+        assert_eq!(config.codex_kill_trace_dir, None);
+        assert!(
+            !serde_json::to_string(&config)
+                .unwrap()
+                .contains("codexKillTrace")
+        );
+    }
 }

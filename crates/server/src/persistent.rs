@@ -243,12 +243,15 @@ pub async fn serve(path: &Path, session: &str) -> Result<(), Box<dyn std::error:
         .ok_or("The runner socket has no parent directory.")?
         .join(key);
     config::owner_only_directory(&runtime_dir)?;
-    let factory = Arc::new(AgentFactory::new(
-        format!("http://127.0.0.1:{}", settings.port),
-        settings.token,
-        runtime_dir,
-        crate::uploads::uploads_dir(store.path()),
-    ));
+    let factory = Arc::new(
+        AgentFactory::new(
+            format!("http://127.0.0.1:{}", settings.port),
+            settings.token,
+            runtime_dir,
+            crate::uploads::uploads_dir(store.path()),
+        )
+        .with_codex_kill_trace_dir(settings.codex_kill_trace_dir),
+    );
     let mut runner = RunningSession::start(store.clone(), session, factory).await?;
     let wake = if session_info.agent == "codex" {
         let handle = runner.handle();

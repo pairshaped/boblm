@@ -886,3 +886,87 @@ async fn child_turn_notifications_do_not_replace_or_finish_the_parent_turn() {
     assert_eq!(answer(&events), "steered: carry on");
     session.stop().await.unwrap();
 }
+
+/// A fake `codex` that runs the fake app-server, and a fake `strace` that skips its options up
+/// to `-o <file>` and execs the rest, so no real ptrace is needed.
+fn traced_fixture(temp: &Path, with_strace: bool) -> (std::path::PathBuf, std::ffi::OsString) {
+    use std::os::unix::fs::PermissionsExt;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let bin = temp.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let write = |name: &str, body: String| {
+        let path = bin.join(name);
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+    let codex = write(
+        "codex",
+        format!(
+            "#!/bin/sh\nexec python3 -u {} \"$@\"\n",
+            root.join("tests/fake_app_server.py").display()
+        ),
+    );
+    if with_strace {
+        write(
+            "strace",
+            "#!/bin/sh\nwhile [ \"$1\" != \"-o\" ]; do shift; done\nshift 2\nexec \"$@\"\n".into(),
+        );
+    }
+    (codex, bin.into_os_string())
+}
+
+#[tokio::test]
+async fn a_traced_launch_initializes_talks_and_stops_cleanly() {
+    let temp = tempfile::tempdir().unwrap();
+    let (codex, path) = traced_fixture(temp.path(), true);
+    let logs = temp.path().join("kills");
+    let command = boblm_codex_driver::kill_trace::command_in(
+        codex.to_str().unwrap(),
+        Some(&logs),
+        "chat-1",
+        Some(&path),
+        1,
+    );
+    assert!(
+        command
+            .as_std()
+            .get_program()
+            .to_string_lossy()
+            .ends_with("/strace")
+    );
+    let mut session = CodexSession::spawn_command(command, options(None))
+        .await
+        .unwrap();
+    session.send_message("u1", "hello", None).await.unwrap();
+    let events = until_result(&mut session).await;
+    assert!(started(&events, "u1"));
+    assert!(logs.is_dir());
+    timeout(DEADLINE, session.stop())
+        .await
+        .expect("a stop in time")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_missing_strace_starts_codex_untraced() {
+    let temp = tempfile::tempdir().unwrap();
+    let (codex, path) = traced_fixture(temp.path(), false);
+    let command = boblm_codex_driver::kill_trace::command_in(
+        codex.to_str().unwrap(),
+        Some(&temp.path().join("kills")),
+        "chat-1",
+        Some(&path),
+        1,
+    );
+    assert_eq!(command.as_std().get_program(), codex.as_os_str());
+    let mut session = CodexSession::spawn_command(command, options(None))
+        .await
+        .unwrap();
+    session.send_message("u1", "hello", None).await.unwrap();
+    assert!(started(&until_result(&mut session).await, "u1"));
+    timeout(DEADLINE, session.stop())
+        .await
+        .expect("a stop in time")
+        .unwrap();
+}
