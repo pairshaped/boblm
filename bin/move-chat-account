@@ -174,10 +174,25 @@ def describe(info, target, compact):
     return line, compacting
 
 
+def sessions_patiently(server, deadline):
+    """List the chats, riding out a web server restart or a failed call until the deadline.
+
+    A wait can last hours and BobLM is redeployed in that time, so one failed list call must not
+    end it."""
+    while True:
+        try:
+            return server.sessions()
+        except (Failure, Stop) as problem:
+            if time.monotonic() >= deadline:
+                raise Stop(2, f"BobLM could not list the chats before the wait ended: {problem}")
+            print(f"Could not list the chats ({problem}); trying again shortly.", flush=True)
+            time.sleep(POLL_SECONDS)
+
+
 def wait_until(server, session_id, deadline, ready, interval=POLL_SECONDS):
     """Poll the chat until ready(info) is true, returning (info, last blockers)."""
     while True:
-        info = resolve(server.sessions(), session_id)
+        info = resolve(sessions_patiently(server, deadline), session_id)
         if ready(info):
             return info, []
         if time.monotonic() >= deadline:
@@ -194,7 +209,7 @@ def compact_first(server, info):
     deadline = time.monotonic() + COMPACT_TIMEOUT_SECONDS
     while True:
         time.sleep(POLL_SECONDS)
-        current = resolve(server.sessions(), session_id)
+        current = resolve(sessions_patiently(server, deadline), session_id)
         busy = bool(blockers(current))
         seen_busy = seen_busy or busy
         updated = (current["status"].get("usage") or {}).get("contextUpdatedAt")

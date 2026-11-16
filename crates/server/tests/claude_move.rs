@@ -838,3 +838,71 @@ async fn the_script_compacts_a_full_chat_waits_for_it_to_settle_and_then_moves()
         "the settling refusal is retried"
     );
 }
+
+/// A wait can last hours and BobLM is redeployed meanwhile, so failed list calls must not end it.
+#[tokio::test]
+async fn the_script_keeps_waiting_through_failed_list_calls() {
+    use tokio::io::AsyncWriteExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let mut lists = 0;
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_request(&mut socket).await;
+            let path = request.split_whitespace().nth(1).unwrap_or("").to_owned();
+            let (code, body) = if path == "/commands/moveClaudeAccount" {
+                (
+                    200,
+                    json!({"sessionId":"abcdef12-0000-4000-8000-000000000001","from":"Claude plan B","to":"Claude plan A","status":"moved"}),
+                )
+            } else {
+                lists += 1;
+                match lists {
+                    // The first call finds the chat busy, two calls then fail as they did
+                    // during a deploy, and the chat goes idle afterwards.
+                    1 | 4 => (
+                        200,
+                        json!({"cursor":0,"models":[],"projects":[],"sessions":[chat(true)]}),
+                    ),
+                    2 | 3 => (
+                        404,
+                        json!({"code":"not_found","message":"There is no chat with ID \"gone\" on this server."}),
+                    ),
+                    _ => (
+                        200,
+                        json!({"cursor":0,"models":[],"projects":[],"sessions":[chat(false)]}),
+                    ),
+                }
+            };
+            let body = body.to_string();
+            let reply = format!(
+                "HTTP/1.1 {code} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(reply.as_bytes()).await;
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("boblm.json");
+    std::fs::write(&config, json!({"port":port,"token":TOKEN}).to_string()).unwrap();
+    let output = tokio::process::Command::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../bin/move-chat-account"
+    ))
+    .args(["abcd", "a", "--no-compact", "--wait", "30"])
+    .env("BOBLM_CONFIG", &config)
+    .env("BOBLM_MOVE_POLL_SECONDS", "0.05")
+    .output()
+    .await
+    .unwrap();
+    let out = String::from_utf8_lossy(&output.stdout).to_string();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{out}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(out.contains("Could not list the chats"), "{out}");
+    assert!(out.contains("Moved to Claude plan A"), "{out}");
+}

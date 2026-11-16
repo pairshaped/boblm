@@ -1293,3 +1293,43 @@ async fn project_rename_changes_only_the_label_and_survives_reload() {
     .await;
     assert_ne!(code, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn the_chat_list_leaves_out_a_chat_that_is_not_loaded_instead_of_failing() {
+    let temp = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
+    let store = Store::open(temp.path().join("list.sqlite")).unwrap();
+    let (emit, events) = mpsc::unbounded_channel();
+    let (inputs, _received) = mpsc::unbounded_channel();
+    let factory = Arc::new(Factory(Mutex::new(Some(Fake {
+        emit,
+        events,
+        inputs,
+    }))));
+    let app = App::open(store.clone(), factory, TOKEN.into())
+        .await
+        .unwrap();
+    let router = app.router(Some(temp.path().into()));
+    let project = project(&router, temp.path()).await;
+    let (status, reply) = command(
+        &router,
+        "createSession",
+        serde_json::json!({"sessionId":"loaded","projectId":project,"model":"sonnet","effort":null}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    // A row the chat registry never loaded stands in for a chat caught mid-deletion or still
+    // loading at startup. The list must carry on without it.
+    store
+        .create_session("ghost", temp.path().to_str().unwrap(), 2)
+        .unwrap();
+    let (status, list) = command(&router, "listSessions", serde_json::json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let ids: Vec<&str> = list["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|session| session["sessionId"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["loaded"]);
+    app.shutdown().await.unwrap();
+}

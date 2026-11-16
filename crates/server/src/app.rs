@@ -627,7 +627,17 @@ async fn list_sessions(
         .map_err(ApiError::internal)??;
     let mut infos = Vec::new();
     for session in snapshot.sessions {
-        infos.push(app.info(session).await?);
+        let id = session.id.clone();
+        match app.info(session).await {
+            Ok(info) => infos.push(info),
+            // A chat being deleted leaves the registry before its row is gone, and a chat can
+            // still be loading at startup. Leave it out for this call instead of failing the
+            // list for every other chat; the next list call has the settled answer.
+            Err(error) if error.0 == StatusCode::NOT_FOUND => eprintln!(
+                "server: left chat {id} out of the chat list because it is not loaded; it is probably being deleted or still starting."
+            ),
+            Err(error) => return Err(error),
+        }
     }
     Ok(Json(ListSessionsResponse {
         cursor: Sequence::try_from(snapshot.cursor as u64).map_err(ApiError::invalid)?,
