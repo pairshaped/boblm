@@ -228,6 +228,7 @@ impl ClaudeSession {
         });
         command.args(["--settings", &settings.to_string()]);
         command.args(boblm_tuning::CLAUDE_EXTRA_ARGS);
+        command.envs(boblm_tuning::CLAUDE_ENV.iter().copied());
         if let Some(id) = resume {
             command.args(["--resume", id]);
         }

@@ -93,6 +93,16 @@ pub const CLAUDE_BINARY: &str = "claude";
 pub const CLAUDE_DISALLOWED_TOOLS: &str = "Agent,Task,AskUserQuestion,EnterPlanMode,ExitPlanMode";
 /// Efforts Claude Code accepts.
 pub const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+/// Environment set on every Claude launch (ADR 0051). BobLM runs Claude headless, so telemetry and
+/// error reporting add nothing, and the self-updating native install could swap the CLI version
+/// between chat launches. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` turns off the updater, error
+/// reporting and telemetry; `DISABLE_TELEMETRY` names telemetry on its own. A real turn with both
+/// set produced the same usage, background-job and result events as one without them.
+/// `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` is left out: it only hides a terminal survey prompt.
+pub const CLAUDE_ENV: &[(&str, &str)] = &[
+    ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"),
+    ("DISABLE_TELEMETRY", "1"),
+];
 /// Extra arguments appended to every Claude launch.
 pub const CLAUDE_EXTRA_ARGS: &[&str] = &["--prompt-suggestions", "true"];
 /// BobLM subcommand used by Claude's background Bash hook.
