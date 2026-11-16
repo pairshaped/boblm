@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""Keep the installed Claude Code CLI current, silently, with a rollback (ADR 0052).
+
+  bin/claude-update-check [--dry-run]
+
+Checks the release channel from ~/.claude/settings.json (autoUpdatesChannel, default latest),
+never downgrades, runs `claude update` when a newer version exists, then runs one real smoke
+turn through the launch shape BobLM uses. A failed smoke test rolls the symlink back and
+remembers the bad version. Outcomes go to stdout (the systemd journal) and the state file;
+nothing is sent anywhere. --dry-run only fetches and compares; it never updates, rolls back or
+runs the smoke turn, and writes no state.
+
+Exit codes: 0 up to date, updated, skipped or a transient network failure; 1 an update or
+smoke failure (rolled back when possible).
+
+Environment overrides (used by bin/test-claude-update-check):
+  CLAUDE_UPDATE_RELEASE_URL  CLAUDE_UPDATE_CLAUDE  CLAUDE_UPDATE_SETTINGS  CLAUDE_UPDATE_STATE
+  CLAUDE_UPDATE_SMOKE_TIMEOUT  CLAUDE_UPDATE_TIMEOUT  CLAUDE_UPDATE_RETRY_DELAY
+"""
+import datetime
+import fcntl
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.request
+
+# Environment BobLM sets on every Claude launch. Mirrors CLAUDE_ENV in crates/tuning; a test
+# keeps the two equal.
+CLAUDE_ENV = {
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_TELEMETRY": "1",
+}
+# Mirrors CLAUDE_DISALLOWED_TOOLS in crates/tuning (see ADR 0052 on drift).
+DISALLOWED_TOOLS = "Agent,Task,AskUserQuestion,EnterPlanMode,ExitPlanMode"
+VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+FETCH_TIMEOUT_SECONDS = 30
+FETCH_ATTEMPTS = 3
+VERSION_TIMEOUT_SECONDS = 30
+JOURNAL_OUTPUT_LIMIT = 4000
+STDERR_LIMIT = 600
+SMOKE_PROMPT = "Reply with the single word ok."
+
+USAGE = "Usage: bin/claude-update-check [--dry-run] [--help]"
+
+
+def env_path(name, default):
+    return os.path.expanduser(os.environ.get(name, default))
+
+
+def env_number(name, default):
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+RELEASE_URL = os.environ.get(
+    "CLAUDE_UPDATE_RELEASE_URL", "https://downloads.claude.ai/claude-code-releases"
+).rstrip("/")
+CLAUDE = env_path("CLAUDE_UPDATE_CLAUDE", "~/.local/bin/claude")
+SETTINGS = env_path("CLAUDE_UPDATE_SETTINGS", "~/.claude/settings.json")
+STATE = env_path("CLAUDE_UPDATE_STATE", "~/.local/state/boblm/claude-update.json")
+UPDATE_TIMEOUT = env_number("CLAUDE_UPDATE_TIMEOUT", 20 * 60)
+SMOKE_TIMEOUT = env_number("CLAUDE_UPDATE_SMOKE_TIMEOUT", 120)
+RETRY_DELAY = env_number("CLAUDE_UPDATE_RETRY_DELAY", 5)
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def log(message):
+    print(f"{now()} claude-update-check: {message}", flush=True)
+
+
+def truncate(text, limit):
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit] + "...[truncated]"
+
+
+def version_tuple(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def load_state():
+    try:
+        with open(STATE) as handle:
+            state = json.load(handle)
+        return state if isinstance(state, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_state(state):
+    directory = os.path.dirname(STATE)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    fd, temp = tempfile.mkstemp(dir=directory, prefix=".claude-update.")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(state, handle, indent=2)
+            handle.write("\n")
+        os.chmod(temp, 0o600)
+        os.replace(temp, STATE)
+    except BaseException:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        raise
+
+
+def read_channel():
+    """The owner's channel. Only reads the settings file; anything unexpected means latest."""
+    try:
+        with open(SETTINGS) as handle:
+            channel = json.load(handle).get("autoUpdatesChannel")
+    except (OSError, ValueError, AttributeError):
+        return "latest"
+    return channel if channel in ("latest", "stable") else "latest"
+
+
+def fetch_available(channel):
+    """Returns (version, None) or (None, reason)."""
+    url = f"{RELEASE_URL}/{channel}"
+    reason = "no attempt was made"
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
+                body = response.read(200).decode("utf-8", "replace").strip()
+            if VERSION_RE.fullmatch(body):
+                return body, None
+            reason = "the release server answered with something that is not a version number"
+        except Exception as error:  # network, HTTP and decoding failures all mean "try again"
+            reason = f"could not reach the release server: {error}"
+        if attempt < FETCH_ATTEMPTS:
+            time.sleep(RETRY_DELAY)
+    return None, f"{reason} (after {FETCH_ATTEMPTS} attempts)"
+
+
+def run_capture(args, timeout, env=None):
+    """Runs a command in its own process group. Returns (exit code or None on timeout, output)."""
+    process = subprocess.Popen(
+        args,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        start_new_session=True,
+        env=env,
+    )
+    try:
+        output, _ = process.communicate(timeout=timeout)
+        return process.returncode, output
+    except subprocess.TimeoutExpired:
+        kill_group(process)
+        output, _ = process.communicate()
+        return None, output
+
+
+def kill_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def installed_version():
+    """Returns (version, None) or (None, reason)."""
+    try:
+        code, output = run_capture([CLAUDE, "--version"], VERSION_TIMEOUT_SECONDS)
+    except OSError as error:
+        return None, f"could not run {CLAUDE} --version: {error}"
+    token = output.split()[0] if output.split() else ""
+    if code != 0 or not VERSION_RE.fullmatch(token):
+        return None, f"{CLAUDE} --version gave no usable version (exit {code})"
+    return token, None
+
+
+def layout_target():
+    """The symlink target when claude is a symlink into a directory named versions, else None."""
+    if not os.path.islink(CLAUDE):
+        return None
+    target = os.readlink(CLAUDE)
+    absolute = os.path.join(os.path.dirname(CLAUDE), target)
+    if os.path.basename(os.path.dirname(absolute)) != "versions":
+        return None
+    return target
+
+
+def rollback(previous_target, previous_version):
+    """Atomically repoints the symlink. Returns a failure reason or None."""
+    temp = f"{CLAUDE}.rollback.{os.getpid()}"
+    try:
+        try:
+            os.unlink(temp)
+        except FileNotFoundError:
+            pass
+        os.symlink(previous_target, temp)
+        os.replace(temp, CLAUDE)
+    except OSError as error:
+        return f"could not repoint the symlink: {error}"
+    version, reason = installed_version()
+    if version != previous_version:
+        return f"after rollback claude reports {version or reason}, expected {previous_version}"
+    return None
+
+
+def smoke_test():
+    """One real turn through BobLM's launch shape. Returns a list of failed checks."""
+    args = [
+        CLAUDE,
+        "--output-format", "stream-json",
+        "--verbose",
+        "--input-format", "stream-json",
+        "--include-partial-messages",
+        "--permission-prompts", "none",
+        "--permission-mode", "bypassPermissions",
+        "--model", "haiku",
+        "--prompt-suggestions", "true",
+        "--no-session-persistence",
+        "--disallowedTools", DISALLOWED_TOOLS,
+    ]
+    env = dict(os.environ)
+    env.update(CLAUDE_ENV)
+    message = {"type": "user", "message": {"role": "user", "content": SMOKE_PROMPT}}
+    lines = []
+    result_seen = threading.Event()
+
+    with tempfile.TemporaryDirectory(prefix="claude-update-smoke.") as cwd, \
+            tempfile.TemporaryFile("w+") as stderr_file:
+        try:
+            process = subprocess.Popen(
+                args,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+                text=True,
+                errors="replace",
+                cwd=cwd,
+                env=env,
+                start_new_session=True,
+            )
+        except OSError as error:
+            return [f"could not start claude: {error}"], ""
+
+        def read_stdout():
+            for line in process.stdout:
+                lines.append(line)
+                try:
+                    if json.loads(line).get("type") == "result":
+                        result_seen.set()
+                except (ValueError, AttributeError):
+                    pass
+            result_seen.set()  # end of output also ends the wait
+
+        reader = threading.Thread(target=read_stdout, daemon=True)
+        reader.start()
+        deadline = time.monotonic() + SMOKE_TIMEOUT
+        timed_out = False
+        try:
+            process.stdin.write(json.dumps(message) + "\n")
+            process.stdin.flush()
+        except OSError:
+            pass
+        if not result_seen.wait(timeout=SMOKE_TIMEOUT):
+            timed_out = True
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=max(1.0, deadline - time.monotonic()) if not timed_out else 0.1)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        if timed_out:
+            kill_group(process)
+            process.wait()
+        reader.join(timeout=5)
+        stderr_file.seek(0)
+        stderr = stderr_file.read()
+
+    failures = []
+    if timed_out:
+        failures.append(f"the smoke turn did not finish within {int(SMOKE_TIMEOUT)} seconds")
+    elif process.returncode != 0:
+        failures.append(f"the process exited with status {process.returncode}")
+    events = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except ValueError:
+            failures.append("a stdout line was not valid JSON")
+            break
+    events = [event for event in events if isinstance(event, dict)]
+    if not any(e.get("type") == "system" and e.get("subtype") == "init" for e in events):
+        failures.append("there was no system init event")
+    results = [e for e in events if e.get("type") == "result"]
+    if not any(
+        e.get("subtype") == "success"
+        and e.get("is_error") is False
+        and "ok" in str(e.get("result", "")).lower()
+        for e in results
+    ):
+        failures.append("there was no successful result event containing 'ok'")
+    if not any(e.get("type") == "rate_limit_event" for e in events):
+        failures.append("there was no rate_limit_event")
+    return failures, truncate(stderr, STDERR_LIMIT)
+
+
+def main():
+    args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print(__doc__.strip())
+        return 0
+    dry_run = args == ["--dry-run"]
+    if args and not dry_run:
+        print(USAGE, file=sys.stderr)
+        return 2
+
+    lock = None
+    if not dry_run:
+        os.makedirs(os.path.dirname(STATE), mode=0o700, exist_ok=True)
+        lock = open(os.path.join(os.path.dirname(STATE), "claude-update.lock"), "w")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            log("another run holds the lock; exiting")
+            return 0
+
+    state = load_state()
+    channel = read_channel()
+    record = {
+        "checkedAt": now(),
+        "channel": channel,
+        "installed": None,
+        "available": None,
+        "result": None,
+        "previous": state.get("previous"),
+        "failedVersion": state.get("failedVersion"),
+        "lastSuccessAt": state.get("lastSuccessAt"),
+        "note": "",
+    }
+
+    def finish(result, note, code=0, success=False):
+        record["result"] = result
+        record["note"] = note
+        if success:
+            record["lastSuccessAt"] = now()
+        if dry_run:
+            log(f"dry run: {note}")
+            return code
+        write_state(record)
+        log(f"{result}: {note}")
+        return code
+
+    available, reason = fetch_available(channel)
+    if available is None:
+        return finish("check failed", reason)
+    record["available"] = available
+
+    installed, reason = installed_version()
+    if installed is None:
+        return finish("check failed", reason, code=1)
+    record["installed"] = installed
+
+    if version_tuple(available) <= version_tuple(installed):
+        note = f"installed {installed}, {channel} channel offers {available}"
+        if version_tuple(available) < version_tuple(installed):
+            note += "; the channel is behind the installed version, staying"
+        return finish("up to date", note, success=True)
+
+    if available == record["failedVersion"]:
+        return finish(
+            "skipped",
+            f"skipped: this version already failed the smoke test ({available})",
+        )
+
+    previous_target = layout_target()
+    if previous_target is None:
+        return finish(
+            "unknown install layout",
+            f"{CLAUDE} is not a symlink into a versions directory, so nothing was changed",
+        )
+
+    if dry_run:
+        return finish(
+            "dry run",
+            f"would update {installed} to {available} on the {channel} channel, "
+            "then run the smoke test",
+        )
+
+    log(f"updating {installed} to {available} on the {channel} channel")
+    try:
+        code, output = run_capture([CLAUDE, "update"], UPDATE_TIMEOUT)
+    except OSError as error:
+        code, output = -1, str(error)
+    log("update output: " + truncate(output, JOURNAL_OUTPUT_LIMIT))
+    installed_after, _ = installed_version()
+    if code != 0 or installed_after != available:
+        problem = (
+            f"claude update timed out after {int(UPDATE_TIMEOUT)} seconds" if code is None
+            else f"claude update exited with status {code}" if code != 0
+            else f"claude update finished but --version still reports {installed_after}"
+        )
+        if layout_target() != previous_target:
+            failure = rollback(previous_target, installed)
+            problem += "; rolled back to " + installed if failure is None else f"; ROLLBACK FAILED: {failure}"
+        return finish("update failed", problem, code=1)
+
+    failures, stderr = smoke_test()
+    if failures:
+        problem = "smoke test failed: " + "; ".join(failures)
+        failure = rollback(previous_target, installed)
+        problem += f"; rolled back to {installed}" if failure is None else f"; ROLLBACK FAILED: {failure}"
+        problem += f"; stderr: {stderr}"
+        record["failedVersion"] = available
+        return finish("smoke test failed", problem, code=1)
+
+    record["previous"] = installed
+    return finish("updated", f"updated {installed} to {available}; smoke test passed", success=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

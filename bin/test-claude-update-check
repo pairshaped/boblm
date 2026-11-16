@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""Behavior test for bin/claude-update-check and bin/install-claude-update-timer.
+
+Everything runs against a temp HOME with a fake `claude`, a local release server and a fake
+systemctl. Nothing touches the real install, settings or systemd.
+"""
+import http.server
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+
+HERE = pathlib.Path(__file__).resolve().parent
+ROOT = HERE.parent
+JOB = HERE / "claude-update-check"
+INSTALLER = HERE / "install-claude-update-timer"
+
+FAKE_CLAUDE = r"""#!/usr/bin/env bash
+case "${1:-}" in
+  --version) echo "__VERSION__ (Claude Code)"; exit 0 ;;
+  update)
+    echo update >> "$FAKE_LOG"
+    echo "fake update output"
+    [[ -z ${FAKE_UPDATE_FAIL:-} ]] || exit 1
+    [[ -z ${FAKE_UPDATE_TO:-} ]] || ln -sfn "$FAKE_VERSIONS/$FAKE_UPDATE_TO" "$FAKE_LINK"
+    exit 0 ;;
+esac
+echo "stream $*" >> "$FAKE_LOG"
+echo "env $CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY $CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC $DISABLE_TELEMETRY" >> "$FAKE_LOG"
+read -r line
+echo "stdin $line" >> "$FAKE_LOG"
+[[ -z ${FAKE_HANG:-} ]] || sleep 600
+echo "bad thing" >&2
+[[ -n ${FAKE_NO_INIT:-} ]] || echo '{"type":"system","subtype":"init"}'
+echo '{"type":"stream_event","event":{}}'
+[[ -n ${FAKE_NO_RATE:-} ]] || echo '{"type":"rate_limit_event"}'
+echo "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":${FAKE_ERROR:-false},\"result\":\"OK\"}"
+cat > /dev/null
+exit "${FAKE_EXIT:-0}"
+"""
+
+failures = []
+
+
+def check(condition, message):
+    if not condition:
+        failures.append(message)
+        print(f"FAIL: {message}")
+
+
+class Release(http.server.BaseHTTPRequestHandler):
+    versions = {}
+    paths = []
+
+    def do_GET(self):
+        Release.paths.append(self.path)
+        name = self.path.rsplit("/", 1)[-1]
+        body = Release.versions.get(name)
+        if body is None:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Release)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+URL = f"http://127.0.0.1:{server.server_address[1]}/claude-code-releases"
+
+
+class Sandbox:
+    def __init__(self, installed="2.1.325", extra_versions=("2.1.326",)):
+        self.dir = pathlib.Path(tempfile.mkdtemp(prefix="claude-update-test."))
+        self.home = self.dir / "home"
+        self.versions = self.home / ".local/share/claude/versions"
+        self.versions.mkdir(parents=True)
+        self.link = self.home / ".local/bin/claude"
+        self.link.parent.mkdir(parents=True)
+        for version in (installed, *extra_versions):
+            self.make_version(version)
+        self.link.symlink_to(self.versions / installed)
+        self.state = self.dir / "state/claude-update.json"
+        self.log = self.dir / "fake.log"
+        self.settings = self.dir / "settings.json"
+        self.extra = {}
+        Release.versions = {"latest": "2.1.326\n", "stable": "2.1.311\n"}
+        Release.paths = []
+
+    def make_version(self, version):
+        path = self.versions / version
+        path.write_text(FAKE_CLAUDE.replace("__VERSION__", version))
+        path.chmod(0o755)
+
+    def run(self, *args, **extra):
+        env = dict(os.environ)
+        env.update(
+            HOME=str(self.home),
+            CLAUDE_UPDATE_RELEASE_URL=URL,
+            CLAUDE_UPDATE_CLAUDE=str(self.link),
+            CLAUDE_UPDATE_SETTINGS=str(self.settings),
+            CLAUDE_UPDATE_STATE=str(self.state),
+            CLAUDE_UPDATE_RETRY_DELAY="0",
+            CLAUDE_UPDATE_SMOKE_TIMEOUT="5",
+            FAKE_LOG=str(self.log),
+            FAKE_VERSIONS=str(self.versions),
+            FAKE_LINK=str(self.link),
+        )
+        env.update(self.extra)
+        env.update(extra)
+        return subprocess.run(
+            [str(JOB), *args], env=env, capture_output=True, text=True, timeout=60
+        )
+
+    def target(self):
+        return os.readlink(self.link)
+
+    def version(self):
+        return pathlib.Path(self.target()).name
+
+    def calls(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def updates(self):
+        return [line for line in self.calls() if line == "update"]
+
+    def state_json(self):
+        return json.loads(self.state.read_text())
+
+    def cleanup(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def scenario(name):
+    print(f"-- {name}")
+
+
+# Up to date.
+scenario("up to date")
+s = Sandbox()
+Release.versions["latest"] = "2.1.325"
+r = s.run()
+check(r.returncode == 0, "up to date exits 0")
+check(s.state_json()["result"] == "up to date", "up to date is recorded")
+check(not s.updates(), "up to date calls no update")
+check(oct(s.state.stat().st_mode & 0o777) == "0o600", "state file is 0600")
+check(oct(s.state.parent.stat().st_mode & 0o777) == "0o700", "state directory is 0700")
+s.cleanup()
+
+# Newer version updates and passes the smoke test.
+scenario("update and smoke pass")
+s = Sandbox()
+r = s.run(FAKE_UPDATE_TO="2.1.326")
+check(r.returncode == 0, f"update exits 0: {r.stdout}{r.stderr}")
+check(s.version() == "2.1.326", "symlink points at the new version")
+state = s.state_json()
+check(state["result"] == "updated", "state says updated")
+check(state["previous"] == "2.1.325" and state["available"] == "2.1.326", "state names versions")
+check(state["lastSuccessAt"], "state has lastSuccessAt")
+check(len(s.updates()) == 1, "update ran once")
+stream = next(line for line in s.calls() if line.startswith("stream "))
+for flag in (
+    "--output-format stream-json", "--verbose", "--input-format stream-json",
+    "--include-partial-messages", "--permission-prompts none",
+    "--permission-mode bypassPermissions", "--model haiku", "--prompt-suggestions true",
+    "--no-session-persistence", "--disallowedTools Agent,Task,AskUserQuestion,EnterPlanMode,ExitPlanMode",
+):
+    check(flag in stream, f"smoke turn passes {flag}")
+check("env 1 1 1" in s.calls(), "smoke turn sets the three launch variables")
+check(any(line.startswith("stdin {") and "Reply with the single word ok." in line for line in s.calls()),
+      "smoke turn sends the user message")
+check("fake update output" in r.stdout, "update output reaches the journal")
+s.cleanup()
+
+# The channel is behind the installed version.
+scenario("stable behind installed")
+s = Sandbox()
+s.settings.write_text('{"autoUpdatesChannel":"stable","minimumVersion":"2.1.325"}')
+r = s.run()
+check(r.returncode == 0 and not s.updates(), "stable behind installed does nothing")
+check("behind the installed version" in s.state_json()["note"], "note says the channel is behind")
+check(s.version() == "2.1.325", "symlink unchanged")
+check(Release.paths and Release.paths[-1].endswith("/claude-code-releases/stable"), "stable URL used")
+s.cleanup()
+
+# Smoke failures roll back; the bad version is skipped; a newer one is tried.
+scenario("smoke failure variants")
+for label, extra in (
+    ("no init", {"FAKE_NO_INIT": "1"}),
+    ("no rate limit event", {"FAKE_NO_RATE": "1"}),
+    ("is_error true", {"FAKE_ERROR": "true"}),
+    ("non-zero exit", {"FAKE_EXIT": "3"}),
+    ("hang", {"FAKE_HANG": "1", "CLAUDE_UPDATE_SMOKE_TIMEOUT": "2"}),
+):
+    s = Sandbox()
+    r = s.run(FAKE_UPDATE_TO="2.1.326", **extra)
+    check(r.returncode == 1, f"{label}: exits 1")
+    check(s.version() == "2.1.325", f"{label}: symlink rolled back")
+    check(s.state_json()["failedVersion"] == "2.1.326", f"{label}: failed version recorded")
+    check("rolled back" in r.stdout, f"{label}: journal says rolled back")
+    check("bad thing" in r.stdout or label == "hang", f"{label}: stderr is in the journal")
+    if label == "no init":
+        # Same bad version is skipped.
+        s.log.unlink()
+        r = s.run(FAKE_UPDATE_TO="2.1.326")
+        check(r.returncode == 0 and not s.updates(), "failed version is skipped")
+        check("already failed the smoke test" in s.state_json()["note"], "skip is recorded")
+        check(s.state_json()["failedVersion"] == "2.1.326", "failed version is remembered")
+        # A newer version is tried again.
+        s.make_version("2.1.327")
+        Release.versions["latest"] = "2.1.327"
+        r = s.run(FAKE_UPDATE_TO="2.1.327")
+        check(r.returncode == 0 and s.version() == "2.1.327", "a newer version is tried and installed")
+        check(s.state_json()["result"] == "updated", "newer version result is updated")
+    s.cleanup()
+
+# update itself fails.
+scenario("update failures")
+s = Sandbox()
+r = s.run(FAKE_UPDATE_FAIL="1")
+check(r.returncode == 1 and s.version() == "2.1.325", "update exiting non-zero fails and changes nothing")
+check(s.state_json()["result"] == "update failed", "update failure recorded")
+check(not any(line.startswith("stream") for line in s.calls()), "no smoke turn after failed update")
+s.cleanup()
+
+s = Sandbox()
+r = s.run()  # update succeeds but does nothing
+check(r.returncode == 1 and s.version() == "2.1.325", "update that leaves the old version fails")
+check("still reports 2.1.325" in s.state_json()["note"], "old version after update is explained")
+s.cleanup()
+
+# Unknown layout.
+scenario("unknown layout")
+s = Sandbox()
+real = s.link.resolve()
+s.link.unlink()
+shutil.copy(real, s.link)
+r = s.run(FAKE_UPDATE_TO="2.1.326")
+check(r.returncode == 0 and not s.updates(), "regular file is left alone")
+check(s.state_json()["result"] == "unknown install layout", "unknown layout recorded")
+s.cleanup()
+
+# Dry run.
+scenario("dry run")
+s = Sandbox()
+r = s.run("--dry-run", FAKE_UPDATE_TO="2.1.326")
+check(r.returncode == 0 and not s.updates() and s.version() == "2.1.325", "dry run changes nothing")
+check(not s.state.exists(), "dry run writes no state")
+check("would update 2.1.325 to 2.1.326" in r.stdout, "dry run prints the plan")
+check(not any(line.startswith("stream") for line in s.calls()), "dry run runs no smoke turn")
+s.cleanup()
+
+# Unreachable server.
+scenario("unreachable server")
+s = Sandbox()
+r = s.run(CLAUDE_UPDATE_RELEASE_URL="http://127.0.0.1:1/x")
+check(r.returncode == 0, "unreachable server exits 0")
+check(s.state_json()["result"] == "check failed" and s.state_json()["note"], "failure noted")
+Release.versions["latest"] = "not a version"
+r = s.run()
+check(r.returncode == 0 and s.state_json()["result"] == "check failed", "garbage body is a failed check")
+s.cleanup()
+
+# Lock contention.
+scenario("lock contention")
+s = Sandbox()
+s.state.parent.mkdir(parents=True, mode=0o700)
+holder = subprocess.Popen(
+    ["flock", "-x", str(s.state.parent / "claude-update.lock"), "sleep", "30"]
+)
+for _ in range(50):
+    if (s.state.parent / "claude-update.lock").exists():
+        break
+    subprocess.run(["sleep", "0.1"])
+subprocess.run(["sleep", "0.3"])
+r = s.run(FAKE_UPDATE_TO="2.1.326")
+holder.kill()
+holder.wait()
+check(r.returncode == 0 and "another run holds the lock" in r.stdout, "lock contention exits 0")
+check(not s.updates(), "lock contention does nothing")
+s.cleanup()
+
+# Channel selection.
+scenario("channel selection")
+s = Sandbox()
+s.run()
+check(Release.paths[-1].endswith("/latest") and s.state_json()["channel"] == "latest", "missing settings means latest")
+s.settings.write_text("not json")
+s.run()
+check(Release.paths[-1].endswith("/latest"), "unreadable settings means latest")
+s.settings.write_text('{"autoUpdatesChannel":"beta"}')
+s.run()
+check(Release.paths[-1].endswith("/latest"), "unknown channel means latest")
+s.settings.write_text('{"autoUpdatesChannel":"stable"}')
+s.run()
+check(Release.paths[-1].endswith("/stable"), "stable settings select stable")
+check(json.loads(s.settings.read_text()) == {"autoUpdatesChannel": "stable"}, "settings are never written")
+s.cleanup()
+
+# Drift guard: the script's launch environment and tools equal crates/tuning.
+scenario("tuning drift")
+tuning = (ROOT / "crates/tuning/src/lib.rs").read_text()
+block = re.search(r"pub const CLAUDE_ENV: &\[\(&str, &str\)\] = &\[(.*?)\];", tuning, re.S).group(1)
+rust_env = dict(re.findall(r'\("([^"]+)",\s*"([^"]*)"\)', block))
+script = JOB.read_text()
+ns = {}
+exec(re.search(r"^CLAUDE_ENV = \{.*?^\}", script, re.S | re.M).group(0), ns)
+check(ns["CLAUDE_ENV"] == rust_env and rust_env, "CLAUDE_ENV matches crates/tuning")
+rust_tools = re.search(r'CLAUDE_DISALLOWED_TOOLS: &str = "([^"]+)"', tuning).group(1)
+check(f'DISALLOWED_TOOLS = "{rust_tools}"' in script, "disallowed tools match crates/tuning")
+rust_model = re.search(r'CLAUDE_PERMISSION_MODE: &str = "([^"]+)"', tuning).group(1)
+check(f'"--permission-mode", "{rust_model}"' in script, "permission mode matches crates/tuning")
+
+# Timer installer.
+scenario("timer installer")
+tmp = pathlib.Path(tempfile.mkdtemp(prefix="claude-update-installer."))
+fake = tmp / "systemctl"
+fake.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{tmp}/calls"\n')
+fake.chmod(0o755)
+env = dict(os.environ, UNITS_DIR=str(tmp / "units"), SYSTEMCTL=str(fake))
+r = subprocess.run([str(INSTALLER)], env=env, capture_output=True, text=True)
+calls = (tmp / "calls").read_text()
+check(r.returncode == 0, f"installer exits 0: {r.stderr}")
+for unit in ("boblm-claude-update.service", "boblm-claude-update.timer"):
+    path = tmp / "units" / unit
+    check(path.exists() and oct(path.stat().st_mode & 0o777) == "0o644", f"{unit} installed 0644")
+check("--user daemon-reload" in calls, "daemon-reload ran")
+check("--user enable --now boblm-claude-update.timer" in calls, "timer enabled")
+check("--user list-timers boblm-claude-update.timer --no-legend" in calls, "next run listed")
+r = subprocess.run([str(INSTALLER), "--remove"], env=env, capture_output=True, text=True)
+check(r.returncode == 0, "remove exits 0")
+check(not list((tmp / "units").iterdir()), "remove deletes the units")
+check("--user disable --now boblm-claude-update.timer" in (tmp / "calls").read_text(), "timer disabled")
+shutil.rmtree(tmp)
+
+server.shutdown()
+if failures:
+    print(f"{len(failures)} check(s) failed")
+    sys.exit(1)
+print("claude-update-check tests passed")

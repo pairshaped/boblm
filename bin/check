@@ -9,6 +9,7 @@ run_checks() (
   set -euo pipefail
   bin/test-prune-target
   bin/test-restart
+  bin/test-claude-update-check
   bin/test-dev-instance
   echo '== Error wording =='
   bin/check-messages

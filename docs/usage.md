@@ -197,3 +197,11 @@ If the bell is on but alerts don't appear, check the app's notification permissi
 in the operating system and whether Focus is silencing it. On Mac, look under
 System Settings > Notifications for the installed app's name, as described in
 [Apple's notification instructions](https://support.apple.com/en-gb/104996).
+
+## Keeping the Claude CLI current
+
+BobLM turns off Claude's own updater, so a nightly systemd timer updates it and checks the new
+version with one real turn, rolling back on failure (ADR 0052). Install it with
+`bin/install-claude-update-timer` and turn it off with `bin/install-claude-update-timer --remove`.
+It is silent: read outcomes with `journalctl --user -u boblm-claude-update` or
+`~/.local/state/boblm/claude-update.json`. `bin/claude-update-check --dry-run` shows what it would do.

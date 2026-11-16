@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Install (or --remove) the nightly Claude update timer as systemd user units (ADR 0052).
+#   bin/install-claude-update-timer           copy the units, enable and start the timer
+#   bin/install-claude-update-timer --remove  disable the timer and delete the units
+# UNITS_DIR and SYSTEMCTL override the unit directory and systemctl, for tests.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+src="$here/../systemd"
+units_dir=${UNITS_DIR:-$HOME/.config/systemd/user}
+systemctl_bin=${SYSTEMCTL:-systemctl}
+timer=boblm-claude-update.timer
+units=(boblm-claude-update.service boblm-claude-update.timer)
+
+case "${1:-}" in
+  "")
+    mkdir -p "$units_dir"
+    for unit in "${units[@]}"; do
+      install -m 0644 "$src/$unit" "$units_dir/$unit"
+    done
+    "$systemctl_bin" --user daemon-reload
+    "$systemctl_bin" --user enable --now "$timer"
+    "$systemctl_bin" --user list-timers "$timer" --no-legend
+    ;;
+  --remove)
+    "$systemctl_bin" --user disable --now "$timer" || true
+    for unit in "${units[@]}"; do
+      rm -f "$units_dir/$unit"
+    done
+    "$systemctl_bin" --user daemon-reload
+    echo "Removed the Claude update timer."
+    ;;
+  *)
+    echo "Usage: bin/install-claude-update-timer [--remove]" >&2
+    exit 2
+    ;;
+esac
