@@ -98,8 +98,10 @@ pub const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 /// between chat launches. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` turns off the updater, error
 /// reporting and telemetry; `DISABLE_TELEMETRY` names telemetry on its own. A real turn with both
 /// set produced the same usage, background-job and result events as one without them.
-/// `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` is left out: it only hides a terminal survey prompt.
+/// `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` only hides a terminal survey prompt, which a headless
+/// launch never shows; it is set anyway so a Claude run for any reason stays quiet.
 pub const CLAUDE_ENV: &[(&str, &str)] = &[
+    ("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1"),
     ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"),
     ("DISABLE_TELEMETRY", "1"),
 ];

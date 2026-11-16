@@ -18,7 +18,7 @@ assert "--include-partial-messages" in sys.argv
 assert sys.argv[sys.argv.index("--permission-prompts") + 1] == "none"
 assert set(sys.argv[sys.argv.index("--disallowedTools") + 1].split(",")) == {"Agent", "Task", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode"}
 assert sys.argv[sys.argv.index("--permission-mode") + 1] == "bypassPermissions"
-for name, value in (("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"), ("DISABLE_TELEMETRY", "1")):
+for name, value in (("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1"), ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"), ("DISABLE_TELEMETRY", "1")):
     assert os.environ.get(name) == value, f"{name} must be set on every Claude launch"
 if "EXPECT_RESUME" in os.environ:
     assert sys.argv[sys.argv.index("--resume") + 1] == os.environ["EXPECT_RESUME"]
