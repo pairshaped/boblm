@@ -167,6 +167,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "AttachmentInfo",
         "RetryMessage",
         "SetModel",
+        "MoveClaudeAccount",
+        "MoveClaudeAccountReply",
         "AddProject",
         "RenameProject",
         "ListDirectories",
@@ -319,6 +321,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"sessionId":"s","model":"opus","effort":"high"}),
         ),
         (
+            "MoveClaudeAccount",
+            json!({"sessionId":"s","accountKey":"claude-plan-a"}),
+        ),
+        (
             "AddProject",
             json!({"projectId":"20000000-0000-4000-8000-000000000001","path":"/host/project","name":"project"}),
         ),
@@ -378,6 +384,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "CommandResponse",
             serde_json::to_value(CommandResponse {
                 status: status.clone(),
+            })?,
+        ),
+        (
+            "MoveClaudeAccountReply",
+            serde_json::to_value(MoveClaudeAccountReply {
+                session_id: "s".into(),
+                from: "Claude plan B".into(),
+                to: "Claude plan A".into(),
+                status: ClaudeMoveStatus::Moved,
             })?,
         ),
         (

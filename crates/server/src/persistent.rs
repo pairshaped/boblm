@@ -47,11 +47,18 @@ fn supervised(program: &str) -> io::Result<Command> {
 
 pub struct PersistentFactory {
     config: PathBuf,
+    /// The instance data directory, where Claude account homes and their transcripts live.
+    data_dir: PathBuf,
 }
 impl PersistentFactory {
     pub fn new(config: PathBuf) -> io::Result<Self> {
+        let config = config.canonicalize()?;
+        let database = config::read(&config)
+            .map_err(|error| io::Error::other(error.to_string()))?
+            .database;
         Ok(Self {
-            config: config.canonicalize()?,
+            data_dir: database.parent().unwrap_or(Path::new(".")).to_owned(),
+            config,
         })
     }
 }
@@ -124,6 +131,28 @@ async fn launch(config: &Path, database: &Path, session: &str) -> io::Result<()>
 impl DriverFactory for PersistentFactory {
     fn external_runners(&self) -> bool {
         true
+    }
+    /// Runners copy transcripts for automatic handoffs; the server copies them for a
+    /// manual move, from the same account homes.
+    async fn copy_claude_transcript(&self, session: &Session, target: &str) -> io::Result<()> {
+        let (data, session, target) = (self.data_dir.clone(), session.clone(), target.to_owned());
+        tokio::task::spawn_blocking(move || {
+            crate::claude_account::copy_session_transcript(&data, &session, &target)
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+    fn account_id(&self, session: &Session) -> Option<String> {
+        match session.agent.as_str() {
+            "claude" => crate::claude_account::account_id(
+                &self.data_dir,
+                session
+                    .account_key
+                    .as_deref()
+                    .unwrap_or(boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A),
+            ),
+            _ => None,
+        }
     }
     async fn spawn(&self, _: &Session) -> io::Result<Box<dyn Driver>> {
         Err(io::Error::other(
@@ -397,14 +426,7 @@ async fn wait_for_quiet(
                 ))
             })
             .await??;
-            let silence = event.as_ref().is_some_and(|(payload, created_at)| {
-                let result = serde_json::from_str::<serde_json::Value>(payload)
-                    .is_ok_and(|event| event["type"] == "result");
-                let age = chrono::Utc::now()
-                    .timestamp_millis()
-                    .saturating_sub(*created_at);
-                result && age >= boblm_tuning::RUNNER_QUIET_PERIOD.as_millis() as i64
-            });
+            let silence = result_is_quiet(event.as_ref());
             Ok::<_, Box<dyn std::error::Error>>(
                 silence
                     && !status.turn_active
@@ -436,4 +458,17 @@ async fn wait_for_quiet(
         )
         .await;
     }
+}
+
+/// Whether the newest activity event is a turn result at least `RUNNER_QUIET_PERIOD` old.
+/// Late acknowledgments and compaction starts are activity, so they make a chat not quiet.
+pub(crate) fn result_is_quiet(event: Option<&(String, i64)>) -> bool {
+    event.is_some_and(|(payload, created_at)| {
+        let result = serde_json::from_str::<serde_json::Value>(payload)
+            .is_ok_and(|event| event["type"] == "result");
+        let age = chrono::Utc::now()
+            .timestamp_millis()
+            .saturating_sub(*created_at);
+        result && age >= boblm_tuning::RUNNER_QUIET_PERIOD.as_millis() as i64
+    })
 }

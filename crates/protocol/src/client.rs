@@ -324,6 +324,33 @@ pub struct SetModel {
     pub model: String,
     pub effort: Option<String>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct MoveClaudeAccount {
+    #[schemars(length(min = 1, max = boblm_tuning::MAX_SESSION_ID_CHARS), regex(pattern = "\\S"))]
+    pub session_id: String,
+    /// A Claude plan account key, such as `claude-plan-a`.
+    #[schemars(length(min = 1, max = 40), regex(pattern = "\\S"))]
+    pub account_key: String,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeMoveStatus {
+    /// The conversation was copied and the chat now uses the destination account.
+    Moved,
+    /// An earlier move already put the chat on the destination account; nothing changed.
+    AlreadyMoved,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct MoveClaudeAccountReply {
+    pub session_id: String,
+    /// Plain label of the source account, such as "Claude plan B".
+    pub from: String,
+    /// Plain label of the destination account, such as "Claude plan A".
+    pub to: String,
+    pub status: ClaudeMoveStatus,
+}
 /// Decode an HTTP JSON body with the same size and field validation as the browser.
 pub fn parse_command<T: serde::de::DeserializeOwned + CommandBody>(
     body: &str,
@@ -567,6 +594,19 @@ impl CommandBody for SetModel {
     fn validate(&self) -> Result<(), String> {
         check_session(&self.session_id)?;
         check_choice(&self.model, self.effort.as_deref()).map(|_| ())
+    }
+}
+
+impl CommandBody for MoveClaudeAccount {
+    fn validate(&self) -> Result<(), String> {
+        check_session(&self.session_id)?;
+        if self.account_key.trim().is_empty() || self.account_key.chars().count() > 40 {
+            return Err(format!(
+                "accountKey must be 1 to 40 characters and not blank; got {}.",
+                shown(&self.account_key)
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -903,6 +943,8 @@ pub struct ContractSchemas {
     attachment: AttachmentInfo,
     retry_message: RetryMessage,
     set_model: SetModel,
+    move_claude_account: MoveClaudeAccount,
+    move_claude_account_reply: MoveClaudeAccountReply,
     add_project: AddProject,
     rename_project: RenameProject,
     list_directories: ListDirectories,

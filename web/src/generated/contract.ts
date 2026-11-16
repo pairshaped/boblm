@@ -16,6 +16,7 @@ export type ChatHistory = { readonly "after"?: (Sequence | null); readonly "befo
 export type ChatHistoryPage = { readonly "context": ReadonlyArray<StoredEvent>; readonly "cursor": Sequence; readonly "events": ReadonlyArray<StoredEvent>; readonly "hasMore": boolean; readonly "partialId"?: string | null; readonly "sessionId": string; readonly "status": SessionStatus; };
 export type ChatPresence = { readonly "clientId": string; readonly "reloadCapable"?: boolean; readonly "sessionId"?: string | null; };
 export type ChatPresenceReply = { readonly "reloadId"?: string | null; };
+export type ClaudeMoveStatus = ("moved" | "already_moved");
 export type CommandResponse = { readonly "status": SessionStatus; };
 export type ContextUsage = { readonly "usedTokens": number; readonly "windowTokens": number; };
 export type CreateSession = { readonly "effort"?: string | null; readonly "model": string; readonly "name"?: string; readonly "projectId": string; readonly "sessionId": string; };
@@ -39,6 +40,8 @@ export type ListSessionsResponse = { readonly "cursor"?: Sequence; readonly "mod
 export type MessageAppendedEvent = { readonly "attachments"?: ReadonlyArray<AttachmentInfo>; readonly "content": string; readonly "delivery_state": DeliveryState; readonly "expired_from"?: (ExpiredFrom | null); readonly "role": Role; readonly "sender_session_id"?: string | null; readonly "uuid": string; };
 export type ModelEffortChangedEvent = { readonly "effort"?: string | null; readonly "model": string; };
 export type ModelOption = { readonly "agent": Agent; readonly "efforts": ReadonlyArray<string>; readonly "label": string; readonly "model": string; };
+export type MoveClaudeAccount = { readonly "accountKey": string; readonly "sessionId": string; };
+export type MoveClaudeAccountReply = { readonly "from": string; readonly "sessionId": string; readonly "status": ClaudeMoveStatus; readonly "to": string; };
 export type ProjectInfo = { readonly "createdAt": number; readonly "name": string; readonly "path": string; readonly "projectId": string; };
 export type PushConfigReply = { readonly "publicKey"?: string | null; };
 export type QuestionInfo = { readonly "answer"?: string | null; readonly "answeredAt"?: number | null; readonly "choices": ReadonlyArray<string>; readonly "createdAt": number; readonly "id": string; readonly "question": string; readonly "sessionId": string; readonly "state": QuestionState; };
@@ -471,6 +474,20 @@ export const contractSchema = {
         }
       },
       "type": "object"
+    },
+    "ClaudeMoveStatus": {
+      "oneOf": [
+        {
+          "const": "moved",
+          "description": "The conversation was copied and the chat now uses the destination account.",
+          "type": "string"
+        },
+        {
+          "const": "already_moved",
+          "description": "An earlier move already put the chat on the destination account; nothing changed.",
+          "type": "string"
+        }
+      ]
     },
     "CommandResponse": {
       "additionalProperties": false,
@@ -934,6 +951,55 @@ export const contractSchema = {
         "label",
         "agent",
         "efforts"
+      ],
+      "type": "object"
+    },
+    "MoveClaudeAccount": {
+      "additionalProperties": false,
+      "properties": {
+        "accountKey": {
+          "description": "A Claude plan account key, such as `claude-plan-a`.",
+          "maxLength": 40,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "sessionId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "accountKey"
+      ],
+      "type": "object"
+    },
+    "MoveClaudeAccountReply": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "description": "Plain label of the source account, such as \"Claude plan B\".",
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ClaudeMoveStatus"
+        },
+        "to": {
+          "description": "Plain label of the destination account, such as \"Claude plan A\".",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "from",
+        "to",
+        "status"
       ],
       "type": "object"
     },
@@ -2591,6 +2657,12 @@ export const contractSchema = {
     "list_sessions": {
       "$ref": "#/$defs/ListSessionsResponse"
     },
+    "move_claude_account": {
+      "$ref": "#/$defs/MoveClaudeAccount"
+    },
+    "move_claude_account_reply": {
+      "$ref": "#/$defs/MoveClaudeAccountReply"
+    },
     "project": {
       "$ref": "#/$defs/ProjectInfo"
     },
@@ -2667,6 +2739,8 @@ export const contractSchema = {
     "attachment",
     "retry_message",
     "set_model",
+    "move_claude_account",
+    "move_claude_account_reply",
     "add_project",
     "rename_project",
     "list_directories",
@@ -2710,6 +2784,8 @@ export function parseSendMessage(value: unknown): SendMessage { return decode(co
 export function parseAttachmentInfo(value: unknown): AttachmentInfo { return decode(contractSchema, "AttachmentInfo", value) as AttachmentInfo; }
 export function parseRetryMessage(value: unknown): RetryMessage { return decode(contractSchema, "RetryMessage", value) as RetryMessage; }
 export function parseSetModel(value: unknown): SetModel { return decode(contractSchema, "SetModel", value) as SetModel; }
+export function parseMoveClaudeAccount(value: unknown): MoveClaudeAccount { return decode(contractSchema, "MoveClaudeAccount", value) as MoveClaudeAccount; }
+export function parseMoveClaudeAccountReply(value: unknown): MoveClaudeAccountReply { return decode(contractSchema, "MoveClaudeAccountReply", value) as MoveClaudeAccountReply; }
 export function parseAddProject(value: unknown): AddProject { return decode(contractSchema, "AddProject", value) as AddProject; }
 export function parseRenameProject(value: unknown): RenameProject { return decode(contractSchema, "RenameProject", value) as RenameProject; }
 export function parseListDirectories(value: unknown): ListDirectories { return decode(contractSchema, "ListDirectories", value) as ListDirectories; }

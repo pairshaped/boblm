@@ -99,6 +99,10 @@ pub const CLAUDE_EXTRA_ARGS: &[&str] = &["--prompt-suggestions", "true"];
 pub const CLAUDE_HOOK_BACKGROUND_BASH: &str = "hook-background-bash";
 /// Model passed at launch; the stored session choice is applied before the first turn.
 pub const CLAUDE_LAUNCH_MODEL: &str = "sonnet";
+/// Context percent at or above which `bin/move-chat-account` compacts a chat before moving it,
+/// because the first turn on the new account pays for the whole context again (ADR 0047).
+/// The script mirrors this value; a server test keeps the two equal.
+pub const CLAUDE_MOVE_COMPACT_PERCENT: u32 = 90;
 /// Claude permission mode. Sessions bypass prompts because the owner is never waited on (ADR 0010).
 pub const CLAUDE_PERMISSION_MODE: &str = "bypassPermissions";
 /// Enabled subscription accounts. Add B after logging into its config home.

@@ -90,67 +90,104 @@ impl Store {
         change: &ClaudeHandoff,
         now: i64,
     ) -> Result<()> {
-        let ClaudeHandoff {
-            source,
-            target,
-            account_id,
-            source_reset: until,
-        } = change;
         let mut conn = self.writer.lock().map_err(|_| Error::Poisoned)?;
         let tx = conn.transaction()?;
-        crate::sessions::sql::set_account_key(
-            &tx,
-            crate::sessions::sql::SetAccountKeyParams {
-                id: session,
-                account_key: Some(target),
-            },
-        )?;
-        crate::sessions::sql::set_account(
-            &tx,
-            crate::sessions::sql::SetAccountParams {
-                id: session,
-                account_id: account_id.as_deref(),
-            },
-        )?;
-        sql::record_handoff(
-            &tx,
-            sql::RecordHandoffParams {
-                session,
-                account_key: source,
-                until: *until,
-            },
-        )?;
-        if !sql::needs_continuation(&tx, sql::NeedsContinuationParams { session })?.is_empty() {
-            let uuid = uuid::Uuid::new_v4().to_string();
-            let content = "Your last turn was cut off by the Claude account limit. BobLM moved this conversation to another account. Continue from where you stopped.";
-            crate::messages::sql::append(
-                &tx,
-                crate::NewMessage {
-                    uuid: &uuid,
-                    session,
-                    role: "user",
-                    content,
-                    delivery_state: "queued",
-                    created_at: now,
-                },
-            )?;
-            crate::events::append(
-                &tx,
-                session,
-                "message_appended",
-                serde_json::json!({"uuid":uuid,"role":"user","content":content,"delivery_state":"queued"}),
-                now,
-            )?;
-            sql::clear_continuation(&tx, sql::ClearContinuationParams { session })?;
-        }
-        crate::events::append(
-            &tx,
-            session,
-            "agent_event",
-            serde_json::json!({"type":"system","subtype":"claude_account_changed","previous":source,"account_key":target}),
-            now,
-        )?;
+        apply_handoff(&tx, session, change, now)?;
         tx.commit()?;
         Ok(())
     }
+
+    /// The owner's manual move (ADR 0047). The chat must still be archived by the move,
+    /// still on the source account and without accepted input, checked in the same
+    /// transaction as the switch so input accepted since the move began wins. Returns false,
+    /// changing nothing, when any of that no longer holds.
+    pub fn move_claude_account(
+        &self,
+        session: &str,
+        change: &ClaudeHandoff,
+        now: i64,
+    ) -> Result<bool> {
+        let mut conn = self.writer.lock().map_err(|_| Error::Poisoned)?;
+        let tx = conn.transaction()?;
+        let Some(guard) = sql::move_guard(&tx, sql::MoveGuardParams { session })?.pop() else {
+            return Ok(false);
+        };
+        let current = guard
+            .account_key
+            .as_deref()
+            .unwrap_or(boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A);
+        if !guard.archived || guard.pending.unwrap_or(0) != 0 || current != change.source {
+            return Ok(false);
+        }
+        apply_handoff(&tx, session, change, now)?;
+        tx.commit()?;
+        Ok(true)
+    }
+}
+
+fn apply_handoff(
+    tx: &rusqlite::Transaction<'_>,
+    session: &str,
+    change: &ClaudeHandoff,
+    now: i64,
+) -> Result<()> {
+    let ClaudeHandoff {
+        source,
+        target,
+        account_id,
+        source_reset: until,
+    } = change;
+    crate::sessions::sql::set_account_key(
+        tx,
+        crate::sessions::sql::SetAccountKeyParams {
+            id: session,
+            account_key: Some(target),
+        },
+    )?;
+    crate::sessions::sql::set_account(
+        tx,
+        crate::sessions::sql::SetAccountParams {
+            id: session,
+            account_id: account_id.as_deref(),
+        },
+    )?;
+    sql::record_handoff(
+        tx,
+        sql::RecordHandoffParams {
+            session,
+            account_key: source,
+            until: *until,
+        },
+    )?;
+    if !sql::needs_continuation(tx, sql::NeedsContinuationParams { session })?.is_empty() {
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let content = "Your last turn was cut off by the Claude account limit. BobLM moved this conversation to another account. Continue from where you stopped.";
+        crate::messages::sql::append(
+            tx,
+            crate::NewMessage {
+                uuid: &uuid,
+                session,
+                role: "user",
+                content,
+                delivery_state: "queued",
+                created_at: now,
+            },
+        )?;
+        crate::events::append(
+            tx,
+            session,
+            "message_appended",
+            serde_json::json!({"uuid":uuid,"role":"user","content":content,"delivery_state":"queued"}),
+            now,
+        )?;
+        sql::clear_continuation(tx, sql::ClearContinuationParams { session })?;
+    }
+    crate::events::append(
+        tx,
+        session,
+        "agent_event",
+        serde_json::json!({"type":"system","subtype":"claude_account_changed","previous":source,"account_key":target}),
+        now,
+    )?;
+    Ok(())
 }

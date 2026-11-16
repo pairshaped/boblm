@@ -3,6 +3,8 @@ pub mod sse;
 
 pub mod app;
 
+mod claude_move;
+
 pub mod mcp;
 pub mod schedule;
 pub mod secrets;

@@ -1461,24 +1461,14 @@ impl boblm_runner::DriverFactory for AgentFactory {
         session: &boblm_store::Session,
         target: &str,
     ) -> std::io::Result<()> {
-        let Some(conversation) = session.agent_session_id.clone() else {
-            return Ok(());
-        };
         let data = self.uploads_dir.parent().ok_or_else(|| {
             std::io::Error::other(
                 "Claude has no data directory. Check the database path before resuming.",
             )
         })?;
-        let source = crate::claude_account::home(
-            data,
-            session
-                .account_key
-                .as_deref()
-                .unwrap_or(boblm_tuning::CLAUDE_ACCOUNT_KEY_PLAN_A),
-        )?;
-        let target = crate::claude_account::home(data, target)?;
+        let (data, session, target) = (data.to_owned(), session.clone(), target.to_owned());
         tokio::task::spawn_blocking(move || {
-            crate::claude_account::copy_transcript(&source, &target, &conversation)
+            crate::claude_account::copy_session_transcript(&data, &session, &target)
         })
         .await
         .map_err(std::io::Error::other)?

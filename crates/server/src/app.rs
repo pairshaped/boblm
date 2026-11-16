@@ -111,8 +111,10 @@ pub struct App {
     pub(crate) role_routing: tokio::sync::Mutex<()>,
     pub(crate) question_delivery: tokio::sync::Mutex<()>,
     pub(crate) store: Store,
-    factory: Arc<dyn DriverFactory>,
+    pub(crate) factory: Arc<dyn DriverFactory>,
     pub(crate) external_runners: bool,
+    /// Chats with a Claude account move in progress; one move per chat at a time.
+    pub(crate) claude_moves: std::sync::Mutex<std::collections::BTreeSet<String>>,
     sessions: Mutex<BTreeMap<String, RunningSession>>,
     token: String,
     peer_operations: Mutex<PeerOperations>,
@@ -152,6 +154,7 @@ impl App {
             question_delivery: tokio::sync::Mutex::new(()),
             store,
             external_runners: factory.external_runners(),
+            claude_moves: std::sync::Mutex::new(Default::default()),
             factory,
             sessions: Mutex::new(sessions),
             token,
@@ -338,6 +341,10 @@ impl App {
             .route("/commands/retryMessage", post(retry_message))
             .route("/commands/stopSession", post(stop_session))
             .route("/commands/archiveSession", post(archive_session))
+            .route(
+                "/commands/moveClaudeAccount",
+                post(crate::claude_move::move_account),
+            )
             .route("/commands/reopenSession", post(reopen_session))
             .route("/commands/resumeSession", post(resume_session))
             .route("/sessions/{id}/events", get(session_events))

@@ -92,6 +92,52 @@ replacing those runners as well as the web server.
 The owner accepts the risk that using multiple plan accounts from one host could
 result in both accounts being restricted. Pi remains available as another provider.
 
+## Manual move
+
+The owner can move an idle Claude plan chat to the other plan account with the
+authenticated command `moveClaudeAccount` `{sessionId, accountKey}`, which replies
+`{sessionId, from, to, status}`. `from` and `to` are plain labels ("Claude plan B");
+`status` is `moved`, or `already_moved` when an earlier move already put the chat on
+that account and left its exclusion in place. `bin/move-chat-account <id or prefix>
+<a|b> [--wait SECONDS] [--no-compact] [--dry-run]` wraps it. The server performs the
+move, so a runner started from an older executable needs no new code and no
+replacement.
+
+The command accepts only an enabled Claude plan account for a root Claude chat on a
+plan account. It refuses, with a sentence that says what was refused and that nothing
+changed, a Codex or Pi chat, a subagent, an API chat, an API or unknown destination, a
+destination that is not enabled, a destination with no signed-in account in its home,
+and a destination equal to the current account (unless that is the finished earlier
+move above). It refuses a chat that is not idle with a sentence that names what is running and
+ends "Try again when it is idle." Idle means: not archived, not stopped by the owner,
+no active or stopping turn, nothing queued, dispatching or uncertain (live status and
+stored messages agree), no open subagent, an available and empty job inventory, and a
+newest activity event that is a turn result at least `RUNNER_QUIET_PERIOD` old
+(the runner restart's own test, ADR 0040). A chat that is idle except for that quiet
+period gets error code `settling`, which callers may retry at once; other idle
+refusals carry `not_idle`. One move per chat runs at a time.
+
+The server reuses everything the automatic handoff uses. It stops the idle child
+through the owner's archive path, verifies the child is gone, copies the transcript with
+`copy_transcript`, and commits the switch through one store transaction that shares
+`handoff_claude_account`'s writes: account key, provider identity, the durable exclusion
+from returning to the source before its weekly reset, and the `claude_account_changed`
+event. The manual transaction also requires that the chat is still archived by the move,
+still on the source account and without accepted input, so a message that arrives
+mid-move wins and the move is abandoned. Reopen then leaves the chat for its next
+message to start a child with `--resume` on the same conversation ID and the
+destination account. A failed stop, copy or switch reopens the chat on the source
+account with a plain error; nothing starts a fresh conversation in its place. Archive
+cascades to subagents, which is why open subagents refuse the move.
+
+The prompt cache does not transfer, so the first turn after a move pays for the whole
+context again, about the chat's `usage.context.usedTokens` at the move. The script
+therefore sends the existing `/compact` command first when context is at or above
+`CLAUDE_MOVE_COMPACT_PERCENT` (90) unless `--no-compact` is given, waits for the
+compaction to finish and for the chat to settle, then moves. With `--dry-run` it
+prints the plan and changes nothing. Exit codes: 0 moved, 1 refused or not idle, 2
+usage or error.
+
 ## Transcript-copy evidence
 
 On 2026-11-09, Claude Code 2.1.319 ran an isolated Haiku conversation under

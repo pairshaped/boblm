@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Move an idle Claude plan chat to the other Claude plan account (ADR 0047).
+
+  bin/move-chat-account <session id or unique prefix> <a|b> [--wait SECONDS] [--no-compact] [--dry-run]
+
+Waits (up to --wait, default 0 = refuse if busy) until the chat is idle with no open
+subagents or jobs. When its context is at or above COMPACT_PERCENT it sends /compact
+first, unless --no-compact. Then it calls moveClaudeAccount. --dry-run prints the plan
+and changes nothing.
+
+Exit codes: 0 moved (or already moved), 1 refused or not idle, 2 usage or error.
+The config path and bearer token follow bin/restart: BOBLM_CONFIG, else
+~/.config/boblm/boblm.json. The token is never printed.
+"""
+import json
+import os
+import pathlib
+import sys
+import time
+import urllib.error
+import urllib.request
+import uuid
+
+# Mirrors CLAUDE_MOVE_COMPACT_PERCENT in crates/tuning; a server test keeps them equal.
+COMPACT_PERCENT = 90
+# How often the chat is checked while waiting. The environment override is for tests.
+POLL_SECONDS = float(os.environ.get("BOBLM_MOVE_POLL_SECONDS", 3))
+# Longest a /compact may take before the move is abandoned.
+COMPACT_TIMEOUT_SECONDS = 900
+# A chat whose last turn just ended is not settled for RUNNER_QUIET_PERIOD (20 seconds).
+SETTLE_SECONDS = 45
+KEYS = {"a": "claude-plan-a", "b": "claude-plan-b"}
+LABELS = {"claude-plan-a": "Claude plan A", "claude-plan-b": "Claude plan B"}
+
+USAGE = (
+    "Usage: bin/move-chat-account <session id or unique prefix> <a|b> "
+    "[--wait SECONDS] [--no-compact] [--dry-run]"
+)
+
+
+class Stop(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def usage_error(message):
+    raise Stop(2, f"{message}\n{USAGE}")
+
+
+def parse(argv):
+    wait, compact, dry, positional = 0, True, False, []
+    args = list(argv)
+    while args:
+        arg = args.pop(0)
+        if arg == "--wait":
+            value = args.pop(0) if args else ""
+            if not value.isdigit():
+                usage_error("--wait needs a whole number of seconds.")
+            wait = int(value)
+        elif arg == "--no-compact":
+            compact = False
+        elif arg == "--dry-run":
+            dry = True
+        elif arg.startswith("-"):
+            usage_error(f"Unknown option {arg}.")
+        else:
+            positional.append(arg)
+    if len(positional) != 2:
+        usage_error("Give a chat ID (or unique prefix) and the target account, a or b.")
+    prefix, letter = positional
+    if letter.lower() not in KEYS:
+        usage_error("The target account must be a or b.")
+    return prefix, KEYS[letter.lower()], wait, compact, dry
+
+
+class Server:
+    def __init__(self):
+        path = pathlib.Path(
+            os.environ.get("BOBLM_CONFIG") or pathlib.Path.home() / ".config/boblm/boblm.json"
+        )
+        try:
+            settings = json.loads(path.read_text())
+            self.url = f"http://127.0.0.1:{settings['port']}"
+            self.token = settings["token"]
+        except (OSError, ValueError, KeyError) as error:
+            raise Stop(2, f"Cannot read the BobLM config at {path} ({error.__class__.__name__}). Set BOBLM_CONFIG to its path.")
+
+    def post(self, name, body):
+        request = urllib.request.Request(
+            f"{self.url}/commands/{name}",
+            json.dumps(body).encode(),
+            headers={"Authorization": "Bearer " + self.token, "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            try:
+                info = json.load(error)
+            except ValueError:
+                info = {}
+            raise Failure(error.code, info.get("code", ""), info.get("message") or f"The server answered HTTP {error.code}.")
+        except (urllib.error.URLError, OSError) as error:
+            raise Stop(2, f"Cannot reach BobLM at {self.url} ({error.__class__.__name__}). Check that the service is running.")
+
+    def sessions(self):
+        return self.post("listSessions", {})["sessions"]
+
+
+class Failure(Exception):
+    def __init__(self, status, code, message):
+        super().__init__(message)
+        self.status, self.code = status, code
+
+
+def resolve(sessions, prefix):
+    exact = [s for s in sessions if s["sessionId"] == prefix]
+    found = exact or [s for s in sessions if s["sessionId"].startswith(prefix)]
+    if not found:
+        raise Stop(2, f"No chat has an ID starting with {prefix}. List chats in the browser and try again.")
+    if len(found) > 1:
+        names = ", ".join(s["sessionId"][:8] for s in found)
+        raise Stop(2, f"{prefix} matches {len(found)} chats ({names}). Give more of the ID.")
+    return found[0]
+
+
+def current_key(info):
+    return info["status"].get("accountKey") or "claude-plan-a"
+
+
+def context(info):
+    """Used tokens, window tokens and percent, or None when the chat has not reported them."""
+    usage = (info["status"].get("usage") or {}).get("context")
+    if not usage or not usage.get("windowTokens"):
+        return None
+    return usage["usedTokens"], usage["windowTokens"], 100.0 * usage["usedTokens"] / usage["windowTokens"]
+
+
+def blockers(info):
+    """What keeps the chat from moving right now, in plain words. Empty means idle."""
+    status = info["status"]
+    found = []
+    if status.get("archived"):
+        found.append("it is archived")
+    if status.get("turnActive") or status.get("stopping"):
+        found.append("a turn is running")
+    waiting = status.get("queued", 0) + status.get("dispatching", 0) + status.get("uncertain", 0)
+    if waiting:
+        found.append(f"{waiting} messages are waiting for delivery")
+    jobs = status.get("jobs")
+    if jobs is None and status.get("running"):
+        found.append("its background jobs are unknown")
+    elif jobs is not None and not jobs.get("available"):
+        found.append("its background jobs are unknown")
+    elif jobs is not None and jobs.get("tasks"):
+        found.append(f"{len(jobs['tasks'])} background jobs are running")
+    open_subagents = (info.get("subagents") or {}).get("open", 0)
+    if open_subagents:
+        found.append(f"{open_subagents} subagents are open")
+    return found
+
+
+def describe(info, target, compact):
+    name = info["name"] or "(unnamed)"
+    ctx = context(info)
+    shown = f"{ctx[2]:.0f}% ({ctx[0]:,} of {ctx[1]:,} tokens)" if ctx else "unknown"
+    compacting = bool(ctx and compact and ctx[2] >= COMPACT_PERCENT)
+    line = (
+        f'Plan: move "{name}" ({info["sessionId"][:8]}) from {LABELS.get(current_key(info), current_key(info))} '
+        f"to {LABELS[target]}; context {shown}; "
+        f"{'compact first' if compacting else 'no compaction'}."
+    )
+    return line, compacting
+
+
+def wait_until(server, session_id, deadline, ready, interval=POLL_SECONDS):
+    """Poll the chat until ready(info) is true, returning (info, last blockers)."""
+    while True:
+        info = resolve(server.sessions(), session_id)
+        if ready(info):
+            return info, []
+        if time.monotonic() >= deadline:
+            return info, blockers(info)
+        time.sleep(interval)
+
+
+def compact_first(server, info):
+    before = (info["status"].get("usage") or {}).get("contextUpdatedAt")
+    session_id = info["sessionId"]
+    server.post("sendMessage", {"sessionId": session_id, "messageId": str(uuid.uuid4()), "content": "/compact"})
+    print("Sent /compact; waiting for the compaction to finish.", flush=True)
+    seen_busy = False
+    deadline = time.monotonic() + COMPACT_TIMEOUT_SECONDS
+    while True:
+        time.sleep(POLL_SECONDS)
+        current = resolve(server.sessions(), session_id)
+        busy = bool(blockers(current))
+        seen_busy = seen_busy or busy
+        updated = (current["status"].get("usage") or {}).get("contextUpdatedAt")
+        if not busy and (seen_busy or (updated and updated != before)):
+            ctx = context(current)
+            if ctx and ctx[2] >= COMPACT_PERCENT:
+                raise Stop(1, f"The compaction finished but context is still {ctx[2]:.0f}%, so the chat was not moved. Check the chat, or rerun with --no-compact to move it anyway.")
+            return current
+        if time.monotonic() >= deadline:
+            raise Stop(1, "The compaction did not finish in time. The chat was not moved and stays on its account.")
+
+
+def run(argv):
+    prefix, target, wait, compact, dry = parse(argv)
+    server = Server()
+    info = resolve(server.sessions(), prefix)
+    session_id = info["sessionId"]
+    if info["agent"] != "claude":
+        raise Stop(1, f"{session_id[:8]} is a {info['agent']} chat; only Claude plan chats move between Claude accounts.")
+    line, compacting = describe(info, target, compact)
+    print(line, flush=True)
+    busy = blockers(info)
+    if dry:
+        if current_key(info) == target:
+            print(f"Dry run: it already runs on {LABELS[target]}; nothing would change.")
+        elif busy and wait == 0:
+            print(f"Dry run: it would refuse now because {'; '.join(busy)}. Use --wait to wait for it.")
+            raise Stop(1, "Nothing was changed.")
+        else:
+            if busy:
+                print(f"Dry run: it would wait up to {wait} seconds for the chat to be idle ({'; '.join(busy)}).")
+            if compacting:
+                print("Dry run: it would send /compact and wait for it to finish.")
+            print("Dry run: it would call moveClaudeAccount. Nothing was changed.")
+        return 0
+    deadline = time.monotonic() + wait
+    if busy:
+        info, busy = wait_until(server, session_id, deadline, lambda i: not blockers(i))
+        if busy:
+            raise Stop(1, f"The chat is not idle: {'; '.join(busy)}. It was not moved. Try again when it is idle.")
+    if current_key(info) != target and compacting:
+        info = compact_first(server, info)
+        # The compaction made the chat busy for a while; it may need to settle again.
+        info, busy = wait_until(server, session_id, deadline, lambda i: not blockers(i))
+    settle_until = max(deadline, time.monotonic() + SETTLE_SECONDS)
+    while True:
+        try:
+            reply = server.post("moveClaudeAccount", {"sessionId": session_id, "accountKey": target})
+            break
+        except Failure as failure:
+            retry_until = settle_until if failure.code == "settling" else deadline
+            if failure.status == 409 and time.monotonic() < retry_until:
+                time.sleep(POLL_SECONDS)
+                continue
+            if failure.status in (400, 409):
+                raise Stop(1, str(failure))
+            raise Stop(2, str(failure))
+    verb = "Already on" if reply["status"] == "already_moved" else "Moved to"
+    print(f'{verb} {reply["to"]}: chat {session_id[:8]} (from {reply["from"]}).')
+    after = resolve(server.sessions(), session_id)
+    ctx = context(after)
+    if ctx:
+        print(f"Context is {ctx[2]:.0f}% ({ctx[0]:,} tokens). The first turn on the new account pays for all of it again.")
+    return 0
+
+
+def main():
+    try:
+        sys.exit(run(sys.argv[1:]))
+    except Stop as stop:
+        print(str(stop), file=sys.stderr)
+        sys.exit(stop.code)
+    except KeyboardInterrupt:
+        print("Interrupted. The chat was not moved unless a move was already reported.", file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

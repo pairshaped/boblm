@@ -20,3 +20,9 @@ SELECT session FROM claude_account_continuations WHERE session = @session;
 
 -- func: clear_continuation
 DELETE FROM claude_account_continuations WHERE session = @session;
+
+-- func: move_guard
+SELECT s.archived AS archived, s.account_key AS account_key,
+ (SELECT COUNT(*) FROM messages m WHERE m.session = s.id AND m.expired_at IS NULL
+   AND m.delivery_state IN ('queued', 'dispatching', 'uncertain')) AS pending
+FROM sessions s WHERE s.id = @session;

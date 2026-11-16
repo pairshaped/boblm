@@ -127,3 +127,32 @@ pub fn clear_continuation(
     let conn = conn.as_connection();
     conn.execute(CLEAR_CONTINUATION_SQL, params![params.session])
 }
+
+#[derive(Debug)]
+pub struct MoveGuardParams<'a> {
+    pub session: &'a str,
+}
+
+const MOVE_GUARD_SQL: &str = r"SELECT s.archived AS archived, s.account_key AS account_key,
+ (SELECT COUNT(*) FROM messages m WHERE m.session = s.id AND m.expired_at IS NULL
+   AND m.delivery_state IN ('queued', 'dispatching', 'uncertain')) AS pending
+FROM sessions s WHERE s.id = ?1";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoveGuardRow {
+    pub archived: bool,
+    pub account_key: Option<String>,
+    pub pending: Option<i64>,
+}
+
+pub fn move_guard(conn: &Connection, params: MoveGuardParams<'_>) -> Result<Vec<MoveGuardRow>> {
+    let mut stmt = conn.prepare_cached(MOVE_GUARD_SQL)?;
+    let rows = stmt.query_map(params![params.session], |row| {
+        Ok(MoveGuardRow {
+            archived: row.get(0)?,
+            account_key: row.get(1)?,
+            pending: row.get(2)?,
+        })
+    })?;
+    rows.collect()
+}

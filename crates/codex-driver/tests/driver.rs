@@ -916,28 +916,45 @@ fn traced_fixture(temp: &Path, with_strace: bool) -> (std::path::PathBuf, std::f
     (codex, bin.into_os_string())
 }
 
+/// Spawn a Codex session from a freshly written script. Parallel tests fork while this test's
+/// script file was still open for writing, which makes the kernel refuse the exec with
+/// "Text file busy" for a moment, so retry that one error.
+async fn spawn_retrying(make: impl Fn() -> tokio::process::Command) -> CodexSession {
+    for attempt in 0..40 {
+        match CodexSession::spawn_command(make(), options(None)).await {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 39 =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            other => return other.unwrap(),
+        }
+    }
+    unreachable!("the last attempt returns")
+}
+
 #[tokio::test]
 async fn a_traced_launch_initializes_talks_and_stops_cleanly() {
     let temp = tempfile::tempdir().unwrap();
     let (codex, path) = traced_fixture(temp.path(), true);
     let logs = temp.path().join("kills");
-    let command = boblm_codex_driver::kill_trace::command_in(
-        codex.to_str().unwrap(),
-        Some(&logs),
-        "chat-1",
-        Some(&path),
-        1,
-    );
+    let make = || {
+        boblm_codex_driver::kill_trace::command_in(
+            codex.to_str().unwrap(),
+            Some(&logs),
+            "chat-1",
+            Some(&path),
+            1,
+        )
+    };
     assert!(
-        command
+        make()
             .as_std()
             .get_program()
             .to_string_lossy()
             .ends_with("/strace")
     );
-    let mut session = CodexSession::spawn_command(command, options(None))
-        .await
-        .unwrap();
+    let mut session = spawn_retrying(make).await;
     session.send_message("u1", "hello", None).await.unwrap();
     let events = until_result(&mut session).await;
     assert!(started(&events, "u1"));
@@ -952,17 +969,17 @@ async fn a_traced_launch_initializes_talks_and_stops_cleanly() {
 async fn a_missing_strace_starts_codex_untraced() {
     let temp = tempfile::tempdir().unwrap();
     let (codex, path) = traced_fixture(temp.path(), false);
-    let command = boblm_codex_driver::kill_trace::command_in(
-        codex.to_str().unwrap(),
-        Some(&temp.path().join("kills")),
-        "chat-1",
-        Some(&path),
-        1,
-    );
-    assert_eq!(command.as_std().get_program(), codex.as_os_str());
-    let mut session = CodexSession::spawn_command(command, options(None))
-        .await
-        .unwrap();
+    let make = || {
+        boblm_codex_driver::kill_trace::command_in(
+            codex.to_str().unwrap(),
+            Some(&temp.path().join("kills")),
+            "chat-1",
+            Some(&path),
+            1,
+        )
+    };
+    assert_eq!(make().as_std().get_program(), codex.as_os_str());
+    let mut session = spawn_retrying(make).await;
     session.send_message("u1", "hello", None).await.unwrap();
     assert!(started(&until_result(&mut session).await, "u1"));
     timeout(DEADLINE, session.stop())

@@ -84,6 +84,20 @@ remaining for each account, with reset times and how old each reading is. It
 loads fresh readings each time you open it. BobLM has no Lock button: a browser
 keeps its token until you clear the site's stored data.
 
+## Moving a chat to the other Claude plan account
+
+To move an idle Claude chat from one plan account to the other, keeping the same
+conversation, model and effort, run `bin/move-chat-account <chat ID or unique prefix> <a|b>`
+on the BobLM host. Add `--wait SECONDS` to wait for the chat to become idle (the default
+refuses a busy chat), `--no-compact` to skip compaction, and `--dry-run` to see the plan
+without changing anything.
+
+The chat must have no running turn, queued message, background job or open subagent.
+If its context is 90% full or more, the script compacts it first, because the first turn
+on the new account pays for the whole context again. A move that fails keeps the chat on
+its old account and says why. The chat can't return to the old account automatically
+until that account's weekly reset.
+
 ## Reading long chats
 
 The browser keeps a moving window of up to 500 timeline rows. Scrolling backward

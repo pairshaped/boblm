@@ -87,6 +87,13 @@
     }
   },
   {
+    "type": "MoveClaudeAccount",
+    "value": {
+      "accountKey": "claude-plan-a",
+      "sessionId": "s"
+    }
+  },
+  {
     "type": "AddProject",
     "value": {
       "name": "project",
@@ -403,6 +410,15 @@
         "turnActive": false,
         "uncertain": 1
       }
+    }
+  },
+  {
+    "type": "MoveClaudeAccountReply",
+    "value": {
+      "from": "Claude plan B",
+      "sessionId": "s",
+      "status": "moved",
+      "to": "Claude plan A"
     }
   },
   {

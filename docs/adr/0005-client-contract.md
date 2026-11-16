@@ -41,7 +41,8 @@ ListSessions uses Empty and returns ListSessionsResponse. CreateSession uses
 CreateSession and returns SessionInfo. SendMessage uses SendMessage and returns
 SendMessageResponse. RetryMessage and SetModel use their corresponding body
 types and return CommandResponse. Stop, archive, reopen and resume use
-SessionRef and return CommandResponse. Non-success HTTP responses carry
+SessionRef and return CommandResponse. MoveClaudeAccount (ADR 0047) takes a
+session and a Claude plan account key and returns MoveClaudeAccountReply. Non-success HTTP responses carry
 ErrorInfo. The Server task owns command routes, authentication and handlers.
 
 SendMessage carries the client-generated message UUID. The server persists

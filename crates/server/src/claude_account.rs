@@ -128,6 +128,56 @@ pub fn plan_accounts(
     Ok(accounts)
 }
 
+/// The weekly reset before which a chat may not return to `source`, or one weekly window
+/// from now when that reset is unknown or already past.
+fn source_reset(source: &PlanAccount, now: i64) -> i64 {
+    source
+        .resets_at
+        .filter(|reset| *reset > now)
+        .unwrap_or_else(|| {
+            now.saturating_add(i64::try_from(WEEKLY_USAGE_WINDOW_MINUTES * 60).unwrap_or(i64::MAX))
+        })
+}
+
+/// The plain name for a plan key, as the owner and the move reply say it.
+pub fn plan_label(key: &str) -> String {
+    match key {
+        CLAUDE_ACCOUNT_KEY_PLAN_A => "Claude plan A".into(),
+        CLAUDE_ACCOUNT_KEY_PLAN_B => "Claude plan B".into(),
+        other => format!("the Claude account {other}"),
+    }
+}
+
+/// The handoff the owner asked for. The account's own usage never matters here: the owner
+/// chose the destination, and the source is excluded until its weekly reset like any handoff.
+pub fn manual_handoff(
+    store: &boblm_store::Store,
+    source: &str,
+    target: &str,
+    target_account_id: Option<String>,
+    enabled: &[&'static str],
+    now: i64,
+) -> Result<boblm_runner::ClaudeHandoff, String> {
+    let accounts = plan_accounts(store, enabled)?;
+    let source_reset = accounts
+        .iter()
+        .find(|account| account.key == source)
+        .map_or_else(
+            || {
+                now.saturating_add(
+                    i64::try_from(WEEKLY_USAGE_WINDOW_MINUTES * 60).unwrap_or(i64::MAX),
+                )
+            },
+            |account| source_reset(account, now),
+        );
+    Ok(boblm_runner::ClaudeHandoff {
+        source: source.into(),
+        target: target.into(),
+        account_id: target_account_id,
+        source_reset,
+    })
+}
+
 pub fn handoff_target(
     store: &boblm_store::Store,
     session: &boblm_store::Session,
@@ -151,12 +201,7 @@ pub fn handoff_target(
     if source.available(now) {
         return Ok(None);
     }
-    let source_reset = source
-        .resets_at
-        .filter(|reset| *reset > now)
-        .unwrap_or_else(|| {
-            now.saturating_add(i64::try_from(WEEKLY_USAGE_WINDOW_MINUTES * 60).unwrap_or(i64::MAX))
-        });
+    let source_reset = source_reset(source, now);
     let visits = store
         .reader()
         .map_err(|error| error.to_string())?
@@ -308,6 +353,25 @@ pub fn configure(
     }
     command.env("ANTHROPIC_API_KEY", api_key);
     Ok(())
+}
+
+/// Copy a Claude chat's transcript from its own account home to another account's home.
+pub fn copy_session_transcript(
+    data_dir: &Path,
+    session: &boblm_store::Session,
+    target: &str,
+) -> io::Result<()> {
+    let Some(conversation) = session.agent_session_id.as_deref() else {
+        return Ok(());
+    };
+    let source = home(
+        data_dir,
+        session
+            .account_key
+            .as_deref()
+            .unwrap_or(CLAUDE_ACCOUNT_KEY_PLAN_A),
+    )?;
+    copy_transcript(&source, &home(data_dir, target)?, conversation)
 }
 
 fn private_dir(path: &Path) -> io::Result<()> {
