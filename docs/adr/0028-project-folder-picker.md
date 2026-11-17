@@ -5,7 +5,15 @@ It starts at the service user's HOME directory. Clicking a folder navigates into
 it; the [..] button goes to its parent and is disabled at home. Use this folder
 adds the displayed folder through the idempotent addProject command and closes
 the browser. The sidebar has no path input or separate add-project form.
-No folder is created and no file content is read by the picker.
+New folder opens an inline form to create a folder inside the displayed folder.
+The authenticated createDirectory command accepts its absolute path and a name,
+then returns the new folder's listing so Use this folder can add it immediately.
+Names are trimmed and must contain 1 to MAX_DIRECTORY_NAME_CHARS characters,
+without slashes, null characters or a leading dot. Dot-prefixed folders would be
+hidden by the picker. Existing entries cannot be overwritten. The parent must
+already exist and resolve inside canonical HOME; the created folder is checked
+against the same boundary. Creation uses the process umask.
+No file content is read by the picker.
 
 The authenticated listDirectories command accepts an optional absolute path and
 returns the canonical path, its parent (null at home), and child folder names and
@@ -30,6 +38,7 @@ newer picker. Requests are never retried automatically. The contract decoder
 validates directory replies before the view receives them.
 
 Opening the picker moves keyboard focus inside it. Tab navigation stays within
-its buttons; Escape and Cancel close it and return focus to Browse folders.
+its controls. Escape cancels an open creation form and returns focus to New folder;
+otherwise Escape and Cancel close it and return focus to Browse folders.
 Use this folder returns focus to Browse folders while the add-project command
 runs. Failures appear as errors in the main view and are never retried automatically.

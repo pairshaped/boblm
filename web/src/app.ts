@@ -146,6 +146,8 @@ const emptyHistory = (): HistoryState => ({
 export type Model = {
   fullscreen: boolean;
   directoryPicker: {
+    name?: string | undefined;
+    creating?: boolean;
     listing: DirectoryListing | null;
     loading: boolean;
     error: string;
@@ -255,6 +257,10 @@ export type Msg =
       outcome: CommandOutcome<ChatHistoryPage>;
     }
   | { type: "openDirectories" }
+  | { type: "newDirectory" }
+  | { type: "directoryName"; name: string }
+  | { type: "cancelDirectory" }
+  | { type: "createDirectory" }
   | { type: "browseDirectory"; path: string }
   | { type: "closeDirectories" }
   | { type: "chooseDirectory"; id: string }
@@ -430,7 +436,7 @@ export type Effect =
       name: string;
       chats: number;
     }
-  | { type: "directoryFocus"; open: boolean }
+  | { type: "directoryFocus"; open: boolean; target?: string }
   | { type: "persistUncertain"; uncertain: Readonly<Record<string, Sent>> }
   | {
       type: "persistAttachments";
@@ -1421,6 +1427,80 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
             ],
           ]
         : [model, []];
+    case "newDirectory":
+      if (!model.directoryPicker?.listing || model.directoryPicker.loading)
+        return [model, []];
+      return [
+        {
+          ...model,
+          directoryPicker: { ...model.directoryPicker, name: "", error: "" },
+        },
+        [
+          {
+            type: "directoryFocus",
+            open: true,
+            target: "[data-directory-name]",
+          },
+        ],
+      ];
+    case "directoryName":
+      return model.directoryPicker
+        ? [
+            {
+              ...model,
+              directoryPicker: { ...model.directoryPicker, name: msg.name },
+            },
+            [],
+          ]
+        : [model, []];
+    case "cancelDirectory":
+      return model.directoryPicker
+        ? [
+            {
+              ...model,
+              directoryRequest: model.directoryRequest + 1,
+              directoryPicker: {
+                ...model.directoryPicker,
+                name: undefined,
+                creating: false,
+                loading: false,
+                error: "",
+              },
+            },
+            [
+              {
+                type: "directoryFocus",
+                open: true,
+                target: "[data-new-directory]",
+              },
+            ],
+          ]
+        : [model, []];
+    case "createDirectory": {
+      const picker = model.directoryPicker;
+      if (!picker?.listing || picker.loading || !picker.name?.trim())
+        return [model, []];
+      const sequence = model.directoryRequest + 1;
+      return [
+        {
+          ...model,
+          directoryRequest: sequence,
+          directoryPicker: {
+            ...picker,
+            loading: true,
+            creating: true,
+            error: "",
+          },
+        },
+        [
+          request(
+            "createDirectory",
+            { path: picker.listing.path, name: picker.name },
+            `directory:${sequence}`,
+          ),
+        ],
+      ];
+    }
     case "openDirectories": {
       const sequence = model.directoryRequest + 1;
       return [
@@ -2500,7 +2580,7 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
           [listRequest(model)],
         ];
       }
-      if (msg.name === "listDirectories") {
+      if (msg.name === "listDirectories" || msg.name === "createDirectory") {
         const picker = model.directoryPicker;
         if (!picker || msg.sessionId !== `directory:${model.directoryRequest}`)
           return [model, []];
@@ -2514,14 +2594,32 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
                 error: "",
               },
             },
-            [],
+            msg.name === "createDirectory"
+              ? [
+                  {
+                    type: "directoryFocus",
+                    open: true,
+                    target: "[data-use-directory]",
+                  },
+                ]
+              : [],
           ];
         const error =
           msg.outcome.kind === "rejected"
             ? msg.outcome.error.message
-            : `The folder list could not be loaded: ${msg.outcome.reason ?? "no reply arrived"}. Check the connection and try opening the folder again.`;
+            : msg.name === "createDirectory"
+              ? "The folder creation reply was lost. Browse the parent folder to check whether it was created before trying again."
+              : `The folder list could not be loaded: ${msg.outcome.reason ?? "no reply arrived"}. Check the connection and try opening the folder again.`;
         return [
-          { ...model, directoryPicker: { ...picker, loading: false, error } },
+          {
+            ...model,
+            directoryPicker: {
+              ...picker,
+              loading: false,
+              creating: false,
+              error,
+            },
+          },
           [],
         ];
       }
@@ -5249,12 +5347,22 @@ function directoryDialog(
         "aria-label": "Choose project folder",
         onkeydown: binding((event) => {
           const key = event as KeyboardEvent;
-          if (key.key === "Escape") return { type: "closeDirectories" };
+          if (key.key === "Escape") {
+            event.preventDefault();
+            return {
+              type:
+                picker.name !== undefined
+                  ? "cancelDirectory"
+                  : "closeDirectories",
+            };
+          }
           if (key.key === "Tab") {
             const buttons = [
               ...(
                 event.currentTarget as Element
-              ).querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+              ).querySelectorAll<HTMLButtonElement>(
+                "button:not(:disabled), input:not(:disabled)",
+              ),
             ];
             const first = buttons[0];
             const last = buttons.at(-1);
@@ -5273,23 +5381,80 @@ function directoryDialog(
       h("div", { class: "directory-path" }, listing?.path ?? "Home"),
       picker.error ? h("p", { role: "alert" }, picker.error) : null,
       picker.loading ? h("p", { role: "status" }, "Loading folders…") : null,
+      picker.name !== undefined
+        ? h(
+            "form",
+            {
+              class: "directory-create",
+              onSubmit: binding((event) => {
+                event.preventDefault();
+                return { type: "createDirectory" };
+              }),
+            },
+            h(
+              "label",
+              {},
+              "New folder name",
+              h("input", {
+                "data-directory-name": "",
+                "aria-label": "New folder name",
+                value: picker.name,
+                disabled: picker.creating,
+                onInput: on.inputChanged((name) => ({
+                  type: "directoryName",
+                  name,
+                })),
+              }),
+            ),
+            h(
+              "button",
+              {
+                type: "submit",
+                disabled: picker.loading || !picker.name.trim(),
+              },
+              "Create",
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                onClick: on.clicked({ type: "cancelDirectory" }),
+              },
+              "Cancel",
+            ),
+          )
+        : null,
       listing
         ? h(
             "nav",
             { class: "directory-list", "aria-label": "Folders" },
             h(
-              "button",
-              {
-                type: "button",
-                "aria-label": "Up one folder",
-                disabled: !listing.parent || picker.loading,
-                onClick: on.clicked(
-                  listing.parent
-                    ? { type: "browseDirectory", path: listing.parent }
-                    : { type: "noop" },
-                ),
-              },
-              "[..]",
+              "div",
+              { class: "dialog-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  "data-new-directory": "",
+                  disabled: picker.loading,
+                  onClick: on.clicked({ type: "newDirectory" }),
+                },
+                "New folder",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  "aria-label": "Up one folder",
+                  disabled: !listing.parent || picker.loading,
+                  onClick: on.clicked(
+                    listing.parent
+                      ? { type: "browseDirectory", path: listing.parent }
+                      : { type: "noop" },
+                  ),
+                },
+                "[..]",
+              ),
             ),
             listing.directories.map((folder) =>
               h(
@@ -5327,6 +5492,7 @@ function directoryDialog(
           "button",
           {
             type: "button",
+            "data-use-directory": "",
             disabled: !listing || picker.loading,
             onClick: binding(() => ({
               type: "chooseDirectory",
@@ -5883,7 +6049,7 @@ function accountUsageDialog(model: Model) {
           if (key.key === "Tab") {
             const fields = [
               ...(event.currentTarget as Element).querySelectorAll<HTMLElement>(
-                "button:not(:disabled)",
+                "button:not(:disabled), input:not(:disabled)",
               ),
             ];
             const first = fields[0],

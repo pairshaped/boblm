@@ -189,6 +189,13 @@ pub struct RenameProject {
 pub struct ListDirectories {
     pub path: Option<String>,
 }
+/// Create one visible folder inside the browsed directory.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CreateDirectory {
+    pub path: String,
+    pub name: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DirectoryInfo {
@@ -496,6 +503,29 @@ impl CommandBody for SubmitSecret {
             (None, Some(true)) => Ok(()),
             _ => Err("Send either a non-empty value to save, or cancel: true to decline, not both and not neither.".into()),
         }
+    }
+}
+impl CommandBody for CreateDirectory {
+    fn validate(&self) -> Result<(), String> {
+        ListDirectories {
+            path: Some(self.path.clone()),
+        }
+        .validate()?;
+        let name = self.name.trim();
+        if name.is_empty() || name.chars().count() > boblm_tuning::MAX_DIRECTORY_NAME_CHARS as usize
+        {
+            return Err(format!(
+                "The folder name must contain 1 to {} characters. Enter a shorter, non-empty name.",
+                boblm_tuning::MAX_DIRECTORY_NAME_CHARS
+            ));
+        }
+        if name.starts_with('.') {
+            return Err("The folder name cannot start with a dot because the picker hides dot-folders. Choose a visible folder name.".into());
+        }
+        if name.contains('/') || name.contains('\0') {
+            return Err("The folder name must be a single name without slashes or null characters. Enter just the new folder name.".into());
+        }
+        Ok(())
     }
 }
 impl CommandBody for ListDirectories {
@@ -948,6 +978,7 @@ pub struct ContractSchemas {
     add_project: AddProject,
     rename_project: RenameProject,
     list_directories: ListDirectories,
+    create_directory: CreateDirectory,
     directory_listing: DirectoryListing,
     remove_project: RemoveProject,
     reorder_projects: ReorderProjects,

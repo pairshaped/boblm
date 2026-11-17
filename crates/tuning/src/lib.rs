@@ -245,6 +245,9 @@ pub const MAX_CHAT_NAME_CHARS: usize = 200;
 pub const MAX_CLAUDE_LINE_BYTES: usize = 16 * 1024 * 1024;
 /// Most filesystem entries scanned by one folder-picker request.
 pub const MAX_DIRECTORY_ENTRIES: usize = 2000;
+
+/// Maximum number of Unicode characters in a new folder name.
+pub const MAX_DIRECTORY_NAME_CHARS: u32 = 255;
 /// Most events committed in one database transaction.
 pub const MAX_EVENT_BATCH: usize = 256;
 /// Longest note a parent may attach to a subagent grade, in characters.

@@ -1333,3 +1333,72 @@ async fn the_chat_list_leaves_out_a_chat_that_is_not_loaded_instead_of_failing()
     assert_eq!(ids, ["loaded"]);
     app.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn directory_picker_creates_and_validates_folders() {
+    use serde_json::json;
+    let temp = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target")).unwrap();
+    let app = App::open(
+        Store::open(temp.path().join("create.sqlite")).unwrap(),
+        Arc::new(Factory(Mutex::new(None))),
+        TOKEN.into(),
+    )
+    .await
+    .unwrap();
+    let router = app.router(None);
+    let home = std::fs::canonicalize(std::env::var_os("HOME").unwrap()).unwrap();
+    let root = tempfile::tempdir_in(&home).unwrap();
+    let (status, reply) = command(
+        &router,
+        "createDirectory",
+        json!({"path":root.path(),"name":"  created  "}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    assert_eq!(reply["path"], json!(root.path().join("created")));
+    assert_eq!(reply["parent"], json!(root.path()));
+    assert_eq!(reply["directories"], json!([]));
+    for name in [
+        "",
+        "  ",
+        ".",
+        "..",
+        "a/b",
+        "nul\0name",
+        ".hidden",
+        "created",
+        &"x".repeat(boblm_tuning::MAX_DIRECTORY_NAME_CHARS as usize + 1),
+    ] {
+        let (status, reply) = command(
+            &router,
+            "createDirectory",
+            json!({"path":root.path(),"name":name}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{reply}");
+        let message = reply["message"].as_str().unwrap();
+        assert!(message.ends_with('.'), "{message}");
+        assert!(
+            message.contains("Enter") || message.contains("Choose") || message.contains("choose"),
+            "{message}"
+        );
+    }
+    std::fs::write(root.path().join("file"), "").unwrap();
+    std::os::unix::fs::symlink("/", root.path().join("outside")).unwrap();
+    for path in [
+        std::path::PathBuf::from("/"),
+        root.path().join("missing"),
+        root.path().join("file"),
+        root.path().join("outside"),
+    ] {
+        let (status, reply) = command(
+            &router,
+            "createDirectory",
+            json!({"path":path,"name":"child"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{reply}");
+    }
+    assert!(!root.path().join("missing").exists());
+    app.shutdown().await.unwrap();
+}

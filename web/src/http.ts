@@ -27,7 +27,8 @@ export function parseCommandReply(name: string, value: unknown): unknown {
   if (name === "pushConfig") return parsePushConfigReply(value);
   if (name === "listSessions") return parseListSessionsResponse(value);
   if (name === "chatHistory") return parseChatHistoryPage(value);
-  if (name === "listDirectories") return parseDirectoryListing(value);
+  if (name === "listDirectories" || name === "createDirectory")
+    return parseDirectoryListing(value);
   if (
     name === "listQuestions" ||
     name === "answerQuestion" ||

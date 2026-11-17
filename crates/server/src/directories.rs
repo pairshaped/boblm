@@ -2,7 +2,7 @@
 use boblm_protocol::client::{DirectoryInfo, DirectoryListing, shown};
 use std::{fs, path::PathBuf};
 
-pub(crate) fn list(requested: Option<String>) -> Result<DirectoryListing, String> {
+fn resolve(requested: Option<String>) -> Result<(PathBuf, PathBuf), String> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
@@ -19,6 +19,31 @@ pub(crate) fn list(requested: Option<String>) -> Result<DirectoryListing, String
     if !path.starts_with(&home) {
         return Err("That folder is outside your home directory. Choose a folder inside your home directory.".into());
     }
+    Ok((home, path))
+}
+
+pub(crate) fn create(path: String, name: String) -> Result<DirectoryListing, String> {
+    let (_, parent) = resolve(Some(path))?;
+    let target = parent.join(name.trim());
+    fs::create_dir(&target).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            format!("The folder {} already exists. Open the existing folder or choose another name.", shown(&target.to_string_lossy()))
+        } else {
+            format!("The folder {} could not be created: {error}. Check the parent folder and its permissions or choose another name.", shown(&target.to_string_lossy()))
+        }
+    })?;
+    let (_, resolved) = resolve(Some(target.to_string_lossy().into_owned()))?;
+    list(Some(resolved.to_string_lossy().into_owned()))
+}
+
+pub(crate) fn list(requested: Option<String>) -> Result<DirectoryListing, String> {
+    let (home, path) = resolve(requested)?;
+    let failed = |error| {
+        format!(
+            "The folder {} could not be opened: {error}. Choose another folder or check its permissions.",
+            shown(&path.to_string_lossy())
+        )
+    };
     let entries = fs::read_dir(&path).map_err(failed)?;
     let mut directories = Vec::new();
     for (index, entry) in entries.enumerate() {

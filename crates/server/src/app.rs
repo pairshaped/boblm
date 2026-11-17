@@ -309,6 +309,7 @@ impl App {
             .route("/commands/addProject", post(add_project))
             .route("/commands/renameProject", post(rename_project))
             .route("/commands/listDirectories", post(list_directories))
+            .route("/commands/createDirectory", post(create_directory))
             .route("/commands/removeProject", post(remove_project))
             .route("/commands/reorderProjects", post(reorder_projects))
             .route("/commands/reorderChats", post(reorder_chats))
@@ -674,6 +675,15 @@ impl From<boblm_store::Error> for ApiError {
             _ => Self::internal(error),
         }
     }
+}
+async fn create_directory(bytes: Bytes) -> ApiResult<DirectoryListing> {
+    let request: CreateDirectory = body(&bytes)?;
+    let listing =
+        tokio::task::spawn_blocking(move || crate::directories::create(request.path, request.name))
+            .await
+            .map_err(|error| ApiError::internal_while("create a folder", error))?
+            .map_err(ApiError::invalid)?;
+    Ok(Json(listing))
 }
 async fn list_directories(bytes: Bytes) -> ApiResult<DirectoryListing> {
     let request: ListDirectories = body(&bytes)?;

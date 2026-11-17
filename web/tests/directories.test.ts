@@ -140,18 +140,63 @@ test("directory picker renders folder navigation, selection and empty states", a
     });
     await handle.settle();
     assert.ok(button("[..]").disabled);
+    button("New folder").click();
+    await handle.settle();
+    const input = dom.window.document.querySelector<HTMLInputElement>(
+      "[data-directory-name]",
+    )!;
+    assert.ok(input);
+    assert.ok(button("Create").disabled);
+    assert.deepEqual(handle.effects().at(-1)?.effect, {
+      type: "directoryFocus",
+      open: true,
+      target: "[data-directory-name]",
+    });
+    const dialog = dom.window.document.querySelector('[role="dialog"]')!;
+    const controls = [
+      ...dialog.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), input:not(:disabled)",
+      ),
+    ];
+    controls.at(-1)!.focus();
+    controls.at(-1)!.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    assert.equal(dom.window.document.activeElement, controls[0]);
+    input.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await handle.settle();
+    assert.ok(dom.window.document.querySelector('[role="dialog"]'));
+    assert.equal(
+      dom.window.document.querySelector("[data-directory-name]"),
+      null,
+    );
+    assert.deepEqual(handle.effects().at(-1)?.effect, {
+      type: "directoryFocus",
+      open: true,
+      target: "[data-new-directory]",
+    });
     button("projects").click();
     await handle.settle();
     assert.deepEqual(handle.effects().at(-1)?.effect, {
       type: "request",
       name: "listDirectories",
       body: { path: "/home/me/projects" },
-      sessionId: "directory:2",
+      sessionId: "directory:3",
     });
     handle.dispatch({
       type: "reply",
       name: "listDirectories",
-      sessionId: "directory:2",
+      sessionId: "directory:3",
       outcome: {
         kind: "replied",
         reply: {
@@ -204,4 +249,62 @@ test("Home navigation preserves the previous folder when loading fails", () => {
   });
   assert.equal(model.directoryPicker?.listing, listing);
   assert.match(model.directoryPicker?.error ?? "", /permissions/);
+});
+
+test("creation keeps failures and discards pending replies after cancel, close and lock", () => {
+  let [model] = update(initial("fixture"), { type: "openDirectories" });
+  [model] = update(model, {
+    type: "reply",
+    name: "listDirectories",
+    sessionId: "directory:1",
+    outcome: { kind: "replied", reply: listing },
+  });
+  let effects;
+  [model, effects] = update(model, { type: "newDirectory" });
+  assert.equal(model.directoryPicker?.name, "");
+  assert.deepEqual(effects, [
+    { type: "directoryFocus", open: true, target: "[data-directory-name]" },
+  ]);
+  assert.deepEqual(update(model, { type: "createDirectory" })[1], []);
+  [model] = update(model, { type: "directoryName", name: "child" });
+  [model] = update(model, { type: "createDirectory" });
+  const pending = model;
+  const reply = {
+    type: "reply",
+    name: "createDirectory",
+    sessionId: "directory:2",
+    outcome: {
+      kind: "replied",
+      reply: { path: "/home/me/child", parent: "/home/me", directories: [] },
+    },
+  } as const;
+  [model, effects] = update(model, reply);
+  assert.equal(model.directoryPicker?.listing?.path, "/home/me/child");
+  assert.equal(model.directoryPicker?.name, undefined);
+  assert.deepEqual(effects, [
+    { type: "directoryFocus", open: true, target: "[data-use-directory]" },
+  ]);
+  [model] = update(pending, {
+    ...reply,
+    outcome: {
+      kind: "rejected",
+      error: {
+        code: "invalid_request",
+        message: "Folder exists. Choose another name.",
+      },
+    },
+  });
+  assert.equal(model.directoryPicker?.name, "child");
+  assert.equal(
+    model.directoryPicker?.error,
+    "Folder exists. Choose another name.",
+  );
+  for (const type of [
+    "cancelDirectory",
+    "closeDirectories",
+    "logout",
+  ] as const) {
+    const [canceled] = update(pending, { type });
+    assert.equal(update(canceled, reply)[0], canceled);
+  }
 });

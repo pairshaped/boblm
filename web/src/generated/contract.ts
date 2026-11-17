@@ -19,6 +19,7 @@ export type ChatPresenceReply = { readonly "reloadId"?: string | null; };
 export type ClaudeMoveStatus = ("moved" | "already_moved");
 export type CommandResponse = { readonly "status": SessionStatus; };
 export type ContextUsage = { readonly "usedTokens": number; readonly "windowTokens": number; };
+export type CreateDirectory = { readonly "name": string; readonly "path": string; };
 export type CreateSession = { readonly "effort"?: string | null; readonly "model": string; readonly "name"?: string; readonly "projectId": string; readonly "sessionId": string; };
 export type CreditsReading = { readonly "balance"?: number | null; readonly "observedAt": number; };
 export type DeliveryChangedEvent = { readonly "delivery_state": DeliveryState; readonly "expired_from"?: (ExpiredFrom | null); readonly "retry_count"?: number | null; readonly "uuid": string; };
@@ -517,6 +518,23 @@ export const contractSchema = {
       "required": [
         "usedTokens",
         "windowTokens"
+      ],
+      "type": "object"
+    },
+    "CreateDirectory": {
+      "additionalProperties": false,
+      "description": "Create one visible folder inside the browsed directory.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name"
       ],
       "type": "object"
     },
@@ -2627,6 +2645,9 @@ export const contractSchema = {
     "command": {
       "$ref": "#/$defs/CommandResponse"
     },
+    "create_directory": {
+      "$ref": "#/$defs/CreateDirectory"
+    },
     "create_session": {
       "$ref": "#/$defs/CreateSession"
     },
@@ -2744,6 +2765,7 @@ export const contractSchema = {
     "add_project",
     "rename_project",
     "list_directories",
+    "create_directory",
     "directory_listing",
     "remove_project",
     "reorder_projects",

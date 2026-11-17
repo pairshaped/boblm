@@ -396,7 +396,9 @@ const run = async (dispatch: (msg: Msg) => void, effect: Effect) => {
       requestAnimationFrame(() => {
         document
           .querySelector<HTMLButtonElement>(
-            effect.open ? ".directory-picker button" : "[data-browse-folders]",
+            effect.open
+              ? (effect.target ?? ".directory-picker button")
+              : "[data-browse-folders]",
           )
           ?.focus();
       }),
