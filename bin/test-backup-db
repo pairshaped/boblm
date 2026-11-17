@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""Exercise database backups and timer installation entirely inside a temporary HOME."""
+from contextlib import closing
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import subprocess
+import tempfile
+import time
+import unittest
+
+HERE = Path(__file__).resolve().parent
+
+
+class BackupTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.db = self.root / 'source.sqlite'
+        self.directory = self.root / 'backups'
+        self.state = self.root / 'state' / 'backup.json'
+        self.env = dict(os.environ, HOME=str(self.root), BOBLM_DB=str(self.db),
+                        BOBLM_BACKUP_DIR=str(self.directory), BOBLM_BACKUP_STATE=str(self.state),
+                        BOBLM_BACKUP_KEEP='3', BOBLM_BACKUP_MIN_FREE_BYTES='0')
+        self.writer = sqlite3.connect(self.db)
+        self.addCleanup(self.writer.close)
+        self.writer.execute('PRAGMA journal_mode=WAL')
+        self.writer.execute('CREATE TABLE sessions (id INTEGER)')
+        self.writer.execute('INSERT INTO sessions VALUES (1)')
+        self.writer.commit()
+
+    def run_job(self, *args, code=0):
+        result = subprocess.run([str(HERE / 'backup-db'), *args], env=self.env,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+        return result.stdout
+
+    def old(self, name, age):
+        self.directory.mkdir(exist_ok=True)
+        p = self.directory / name
+        p.write_text('old')
+        os.utime(p, (age, age))
+        return p
+
+    def test_online_and_labels(self):
+        self.writer.execute('INSERT INTO sessions VALUES (2)')
+        self.run_job()
+        p, = self.directory.glob('*.sqlite')
+        self.assertRegex(p.name, r'^boblm-nightly-\d{8}T\d{6}Z.sqlite$')
+        before = sorted(x.name for x in self.directory.iterdir())
+        self.assertEqual(before, [p.name])
+        with closing(sqlite3.connect(p.as_uri() + '?mode=ro', uri=True)) as db:
+            self.assertEqual(db.execute('PRAGMA journal_mode').fetchone(), ('delete',))
+            self.assertEqual(db.execute('SELECT * FROM sessions').fetchall(), [(1,)])
+            self.assertEqual(db.execute('PRAGMA integrity_check').fetchall(), [('ok',)])
+        self.assertEqual(sorted(x.name for x in self.directory.iterdir()), before)
+        self.assertEqual(p.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.directory.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.state.stat().st_mode & 0o777, 0o600)
+        self.run_job('--label', 'pre-123')
+        self.assertTrue((self.directory / 'boblm-pre-123.sqlite').exists())
+        self.run_job('--label', 'pre-123', code=1)
+        self.run_job('--label', '../bad', code=1)
+        self.run_job('--keep', '0', code=1)
+
+    def test_pruning(self):
+        for i in range(4):
+            p = self.old(f'boblm-pre-{i}.sqlite', 100 + i)
+            for suffix in ('-wal', '-shm'):
+                Path(str(p) + suffix).write_text('sidecar')
+        self.old('notes.txt', 1)
+        self.old('boblm-stale.sqlite.partial', 1)
+        self.old('boblm-fresh.sqlite.partial', time.time())
+        for suffix in ('-wal', '-shm', '-journal'):
+            self.old('boblm-stale.sqlite.partial' + suffix, 1)
+            self.old('boblm-fresh.sqlite.partial' + suffix, time.time())
+        (self.directory / 'boblm-directory.sqlite').mkdir()
+        (self.directory / 'boblm-link.sqlite').symlink_to(self.db)
+        self.directory.chmod(0o755)
+        self.run_job('--label', 'new')
+        record = json.loads(self.state.read_text())
+        self.assertEqual(record['kept'], ['boblm-new.sqlite', 'boblm-pre-3.sqlite', 'boblm-pre-2.sqlite'])
+        self.assertEqual(record['deleted'], ['boblm-pre-1.sqlite', 'boblm-pre-0.sqlite'])
+        for i in range(4):
+            for suffix in ('', '-wal', '-shm'):
+                self.assertEqual((self.directory / f'boblm-pre-{i}.sqlite{suffix}').exists(), i >= 2)
+        for name in ('notes.txt', 'boblm-fresh.sqlite.partial', 'boblm-directory.sqlite', 'boblm-link.sqlite'):
+            self.assertTrue((self.directory / name).exists())
+        self.assertFalse((self.directory / 'boblm-stale.sqlite.partial').exists())
+        for suffix in ('-wal', '-shm', '-journal'):
+            self.assertFalse((self.directory / ('boblm-stale.sqlite.partial' + suffix)).exists())
+            self.assertTrue((self.directory / ('boblm-fresh.sqlite.partial' + suffix)).exists())
+        self.env['BOBLM_BACKUP_KEEP'] = '1'
+        self.run_job('--label', 'env')
+        self.assertEqual(len(list(self.directory.glob('boblm-pre-*.sqlite'))), 0)
+        self.run_job('--label', 'override', '--keep', '2')
+        self.assertTrue((self.directory / 'boblm-env.sqlite').exists())
+
+    def test_failures_and_dry_run(self):
+        self.old('boblm-old.sqlite', 1)
+        self.env['BOBLM_BACKUP_MIN_FREE_BYTES'] = str(2**100)
+        self.run_job('--label', 'low', code=1)
+        self.assertTrue((self.directory / 'boblm-old.sqlite').exists())
+        self.env['BOBLM_BACKUP_MIN_FREE_BYTES'] = '0'
+        bad = self.root / 'bad.sqlite'
+        bad.write_text('not a database')
+        self.env['BOBLM_DB'] = str(bad)
+        self.run_job('--label', 'bad', code=1)
+        self.assertFalse(list(self.directory.glob('*.partial*')))
+        self.assertTrue((self.directory / 'boblm-old.sqlite').exists())
+        self.env['BOBLM_DB'] = str(self.db)
+        def snapshot():
+            return sorted((str(p.relative_to(self.root)), p.lstat().st_mtime_ns, p.lstat().st_mode)
+                          for p in self.root.rglob('*'))
+        before = snapshot()
+        out = self.run_job('--dry-run', '--label', 'plan', '--keep', '1')
+        self.assertEqual(before, snapshot())
+        self.assertIn('Would keep: boblm-plan.sqlite.', out)
+        self.assertIn('Would delete: boblm-old.sqlite.', out)
+        self.env['BOBLM_BACKUP_STATE'] = str(self.root / 'absent/state.json')
+        self.env['BOBLM_BACKUP_DIR'] = str(self.root / 'absent/backups')
+        before = snapshot()
+        self.run_job('--dry-run')
+        self.assertEqual(before, snapshot())
+
+    def test_lock(self):
+        self.state.parent.mkdir()
+        with (self.state.parent / 'db-backup.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertIn('holds the lock', self.run_job())
+        self.assertFalse(self.directory.exists())
+
+    def test_config(self):
+        config = self.root / 'config.json'
+        config.write_text(json.dumps(dict(database=str(self.db), token='SECRET')))
+        del self.env['BOBLM_DB']
+        self.env['BOBLM_CONFIG'] = str(config)
+        self.assertNotIn('SECRET', self.run_job('--label', 'config'))
+
+    def test_installer(self):
+        fake = self.root / 'systemctl'
+        log = self.root / 'calls'
+        fake.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALL_LOG"\n')
+        fake.chmod(0o700)
+        units = self.root / 'units'
+        env = dict(self.env, SYSTEMCTL=str(fake), UNITS_DIR=str(units), CALL_LOG=str(log))
+        for args in ([], ['--remove']):
+            subprocess.run([str(HERE / 'install-backup-timer'), *args], env=env, check=True, capture_output=True)
+            self.assertEqual(len(list(units.iterdir())), 2 if not args else 0)
+        self.assertIn('--user enable --now boblm-db-backup.timer', log.read_text())
+        self.assertIn('--user disable --now boblm-db-backup.timer', log.read_text())
+
+
+if __name__ == '__main__':
+    unittest.main()

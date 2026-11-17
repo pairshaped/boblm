@@ -205,3 +205,12 @@ version with one real turn, rolling back on failure (ADR 0052). Install it with
 `bin/install-claude-update-timer` and turn it off with `bin/install-claude-update-timer --remove`.
 It is silent: read outcomes with `journalctl --user -u boblm-claude-update` or
 `~/.local/state/boblm/claude-update.json`. `bin/claude-update-check --dry-run` shows what it would do.
+
+## Database backups
+
+Run `bin/backup-db --dry-run` to inspect the plan, then `bin/install-backup-timer` to enable
+nightly verified database backups. The newest three managed backups survive, including labeled
+pre-migration backups. Read outcomes with `journalctl --user -u boblm-db-backup` and
+`~/.local/state/boblm/db-backup.json`. Backups contain chat history, including chats deleted
+since the copy was taken. Turn the timer off with `bin/install-backup-timer --remove`.
+See [ADR 0053](adr/0053-database-backups.md) for configuration and restoration.

@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""Create a verified online SQLite backup, then prune old backups (ADR 0053).
+
+Environment: BOBLM_DB, BOBLM_CONFIG, BOBLM_BACKUP_DIR, BOBLM_BACKUP_KEEP,
+BOBLM_BACKUP_MIN_FREE_BYTES, BOBLM_BACKUP_STATE. Dry runs write nothing.
+"""
+import argparse
+from contextlib import closing
+import datetime
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sqlite3
+import stat
+import sys
+import tempfile
+import time
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def log(message):
+    print(f"{now():%Y-%m-%dT%H:%M:%SZ} backup-db: {message}", flush=True)
+
+
+def path_env(key, default):
+    return Path(os.environ.get(key, default)).expanduser().absolute()
+
+
+def positive(value):
+    number = int(value)
+    if number < 1:
+        raise ValueError("Retention must be at least 1; choose a larger keep count.")
+    return number
+
+
+def managed(directory):
+    return sorted(
+        (p for p in directory.iterdir()
+         if re.fullmatch(r"boblm-.+\.sqlite", p.name)
+         and stat.S_ISREG(p.lstat().st_mode)),
+        key=lambda p: (-p.stat().st_mtime_ns, p.name),
+    ) if directory.exists() else []
+
+
+def retention(directory, final, keep):
+    others = [p for p in managed(directory) if p != final]
+    return [final] + others[:keep - 1], others[keep - 1:]
+
+
+def free_bytes(directory):
+    while not directory.exists():
+        directory = directory.parent
+    return shutil.disk_usage(directory).free
+
+
+def run(args):
+    keep = positive(args.keep if args.keep is not None else os.environ.get("BOBLM_BACKUP_KEEP", "3"))
+    if args.label is not None and not re.fullmatch(r"[A-Za-z0-9._-]+", args.label):
+        raise ValueError("The label is invalid; use only letters, numbers, dots, underscores and hyphens.")
+    source = os.environ.get("BOBLM_DB")
+    if source is None:
+        config = path_env("BOBLM_CONFIG", "~/.config/boblm/boblm.json")
+        if config.exists():
+            try:
+                value = json.loads(config.read_text())
+                source = value.get("database")
+                if source is not None and (not isinstance(source, str) or not source):
+                    raise ValueError()
+            except (ValueError, AttributeError):
+                raise ValueError("The database configuration is invalid; check its database path.") from None
+    source = Path(source or "~/.local/share/boblm/boblm.sqlite").expanduser().absolute()
+    directory = path_env("BOBLM_BACKUP_DIR", "~/.local/share/boblm/backups")
+    state = path_env("BOBLM_BACKUP_STATE", "~/.local/state/boblm/db-backup.json")
+    name = f"boblm-{args.label if args.label is not None else now().strftime('nightly-%Y%m%dT%H%M%SZ')}.sqlite"
+    final = directory / name
+    lock = None
+    if not args.dry_run:
+        os.umask(0o077)
+        state.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        lock = (state.parent / "db-backup.lock").open("a")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("Another backup holds the lock; skipping this run.")
+            return 0
+        log("Acquired the backup lock.")
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.stat().st_uid == os.getuid():
+            directory.chmod(0o700)
+    if not source.is_file():
+        raise ValueError("The source database does not exist; check the database path.")
+    if os.path.lexists(final):
+        raise ValueError("The backup destination already exists; choose another label or wait for a new timestamp.")
+    wal = Path(str(source) + "-wal")
+    minimum = int(os.environ.get("BOBLM_BACKUP_MIN_FREE_BYTES", source.stat().st_size + (wal.stat().st_size if wal.exists() else 0) + 2 * 1024**3))
+    if minimum < 0:
+        raise ValueError("The minimum free space cannot be negative; correct the override.")
+    free = free_bytes(directory)
+    log(f"Source: {source}; destination: {final}.")
+    log(f"Free space check: {free} bytes available, {minimum} bytes required.")
+    if args.dry_run:
+        kept, deleted = retention(directory, final, keep)
+        log("Would keep: " + ", ".join(p.name for p in kept) + ".")
+        log("Would delete: " + (", ".join(p.name for p in deleted) or "none") + ".")
+        log("Dry run complete; no files were changed.")
+        return 0 if free >= minimum else 1
+    if free < minimum:
+        raise ValueError("There is not enough free space for a backup; free disk space and retry. Older backups were kept.")
+    partial = Path(str(final) + ".partial")
+    # Exclusive creation refuses stale files and symlinks without overwriting them.
+    fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.close(fd)
+    try:
+        log("Writing the online backup.")
+        with closing(sqlite3.connect(str(source), timeout=60)) as src, closing(sqlite3.connect(str(partial), timeout=60)) as dst:
+            src.execute("PRAGMA busy_timeout=60000")
+            src.backup(dst)
+            if dst.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
+                raise ValueError("The backup could not use DELETE journal mode; retry before pruning older backups.")
+        with closing(sqlite3.connect(partial.as_uri() + "?mode=ro", uri=True)) as copy:
+            if copy.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                raise ValueError("The backup failed its integrity check; inspect the source database before retrying.")
+            if not copy.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'").fetchone():
+                raise ValueError("The backup has no sessions table; check the source database path.")
+        log("Verified integrity and the sessions table.")
+        partial.rename(final)
+        final.chmod(0o600)
+    finally:
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            Path(str(partial) + suffix).unlink(missing_ok=True)
+    log(f"Published {name} ({final.stat().st_size} bytes).")
+    kept, deleted = retention(directory, final, keep)
+    try:
+        for p in deleted:
+            p.unlink()
+            for suffix in ("-wal", "-shm"):
+                sidecar = Path(str(p) + suffix)
+                if sidecar.is_file() and not sidecar.is_symlink():
+                    sidecar.unlink()
+            log(f"Deleted {p.name} and its regular sidecar files.")
+        for p in directory.iterdir():
+            if re.fullmatch(r"boblm-.+\.sqlite\.partial(?:-wal|-shm|-journal)?", p.name) and stat.S_ISREG(p.lstat().st_mode) and p.stat().st_mtime < time.time() - 86400:
+                p.unlink()
+                log(f"Deleted stale partial {p.name}.")
+    except OSError as error:
+        log(f"Warning: pruning failed: {error}. The new backup was kept; fix permissions and retry.")
+        return 1
+    record = dict(finishedAt=now().strftime("%Y-%m-%dT%H:%M:%SZ"), file=name,
+                  sizeBytes=final.stat().st_size, integrity="ok", kept=[p.name for p in kept],
+                  deleted=[p.name for p in deleted], freeBytesAfter=free_bytes(directory))
+    fd, temporary = tempfile.mkstemp(dir=state.parent, prefix=".db-backup.")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(record, handle, indent=2)
+            handle.write("\n")
+        os.replace(temporary, state)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    log(f"Backup complete: {name}; kept {len(kept)}, deleted {len(deleted)}; state saved.")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--label")
+    parser.add_argument("--keep")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    try:
+        return run(args)
+    except (OSError, ValueError, sqlite3.Error) as error:
+        log(f"Backup failed: {error}. No further pruning was performed; correct the cause and retry.")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

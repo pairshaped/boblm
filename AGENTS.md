@@ -25,6 +25,8 @@ UI requirements.
 
 ## Deployment
 
+A change that adds database migration NNN needs `bin/backup-db --label pre-NNN` run first (ADR 0053).
+
 The owner gives standing authorization to deploy verified changes; no separate confirmation is
 needed. A web-only restart (persistent runners confirmed by `bin/restart`) does not wait for
 other chats, because their runners and agents keep working. A change that needs runners
