@@ -192,7 +192,7 @@ pub struct RoleStep {
 pub const IMPLEMENTER_STEPS: &[RoleStep] = &[
     RoleStep {
         id: StepId::ImplementerCodexPlan,
-        model: MODEL_GPT_6_1_SOL,
+        model: MODEL_GPT_6_2_SOL,
         simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
         hard_effort: ROLE_IMPLEMENTER_HARD_EFFORT,
         account: AccountKind::CodexPlan,
@@ -1195,7 +1195,7 @@ mod tests {
             panic!("{chosen:?}")
         };
         assert_eq!(chosen.step, StepId::ImplementerCodexPlan);
-        assert_eq!(chosen.model, MODEL_GPT_6_1_SOL);
+        assert_eq!(chosen.model, MODEL_GPT_6_2_SOL);
         assert_eq!(chosen.effort, ROLE_IMPLEMENTER_SIMPLE_EFFORT);
 
         let chosen = resolve(
@@ -1632,7 +1632,7 @@ mod provider_cap_tests {
         for (agent, model, key, expected) in [
             (
                 "codex",
-                MODEL_GPT_6_1_SOL,
+                MODEL_GPT_6_2_SOL,
                 None,
                 Some(ProviderGroup::CodexPlan),
             ),
@@ -1658,7 +1658,7 @@ mod provider_cap_tests {
             ("pi", "another-model", None, None),
             (
                 "codex",
-                MODEL_GPT_6_1_SOL,
+                MODEL_GPT_6_2_SOL,
                 Some(CODEX_ACCOUNT_KEY_API),
                 None,
             ),

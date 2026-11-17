@@ -236,6 +236,30 @@
             "max"
           ],
           "label": "sol",
+          "model": "gpt-6.2-sol"
+        },
+        {
+          "agent": "codex",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "label": "astra",
+          "model": "gpt-6.2-astra"
+        },
+        {
+          "agent": "codex",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "label": "sol-6.1",
           "model": "gpt-6.1-sol"
         },
         {

@@ -101,15 +101,20 @@ and conversation changes use `agent_session_changed`.
 
 ## Model catalog and labels
 
-`MODELS` in `crates/tuning/src/lib.rs` offers exactly eight models, always the newest of
-each: opus, fable (Claude Fable, currently 5.2), sonnet, haiku, sol (`gpt-6.1-sol`), terra (`gpt-6.1-terra`),
-luna (`gpt-6-luna`) and Pi-backed dsf
+`MODELS` in `crates/tuning/src/lib.rs` offers exactly ten models: opus, fable (Claude Fable, currently 5.2), sonnet, haiku,
+sol (`gpt-6.2-sol`, also `CODEX_DEFAULT_MODEL`), astra (`gpt-6.2-astra`), sol-6.1 (`gpt-6.1-sol`),
+terra (`gpt-6.1-terra`), luna (`gpt-6-luna`) and Pi-backed dsf
 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`). Each entry has a short `label` for tight places:
 the model selectors, the drawer header and tool text. Tool text shows `label (id)` where there
-is room. Stored settings, routing state, Pi's models.json and every `model` argument keep
+is room. Labels are unique, because `spawn_peer` resolves a catalog label to its model ID. Chats that
+stored `gpt-6.1-sol` keep it and it stays selectable as `sol-6.1`. Stored settings, routing state, Pi's models.json and every `model` argument keep
 the full ID.
 
 A newer version replaces the ID in tuning and nothing else; the role table points at the same
 named constants. A chat whose stored model is no longer offered keeps launching, resuming and
 archiving, because only `check_choice` (create, switch and spawn) reads the catalog. Switching
 to a model outside the catalog is refused.
+
+`bin/check-codex-models` asks the real `codex app-server` for `model/list` and reports any catalog Codex
+model the server dropped, any new visible non-5.x server model the catalog lacks, and the server default
+versus `CODEX_DEFAULT_MODEL`; it exits 1 when a catalog model is missing and is not part of `bin/check`.

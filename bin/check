@@ -9,6 +9,7 @@ run_checks() (
   set -euo pipefail
   bin/test-prune-target
   bin/test-restart
+  bin/test-check-codex-models
   bin/test-claude-update-check
   bin/test-backup-db
   bin/test-dev-instance

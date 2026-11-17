@@ -71,7 +71,7 @@ fn provider_caps_span_roots_include_owner_chats_and_preserve_retries() {
         ),
         (
             "codex",
-            MODEL_GPT_6_1_SOL,
+            MODEL_GPT_6_2_SOL,
             Some(CODEX_ACCOUNT_KEY_PLAN),
             MAX_OPEN_CODEX_PLAN_AGENTS,
             ProviderGroup::CodexPlan,
@@ -339,7 +339,7 @@ fn provider_caps_reviewers_have_separate_slots_and_archiving_releases_them() {
             "implement",
             "root",
             "codex",
-            MODEL_GPT_6_1_SOL,
+            MODEL_GPT_6_2_SOL,
             Some(CODEX_ACCOUNT_KEY_PLAN),
             false,
         ))

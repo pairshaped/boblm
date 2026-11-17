@@ -1116,7 +1116,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_has_eight_models_with_labels_and_refuses_retired_ones() {
+    fn the_catalog_has_ten_models_with_labels_and_refuses_retired_ones() {
         let labels: Vec<_> = model_catalog()
             .into_iter()
             .map(|m| (m.model, m.label))
@@ -1128,7 +1128,9 @@ mod tests {
                 ("fable", "fable"),
                 ("sonnet", "sonnet"),
                 ("haiku", "haiku"),
-                ("gpt-6.1-sol", "sol"),
+                ("gpt-6.2-sol", "sol"),
+                ("gpt-6.2-astra", "astra"),
+                ("gpt-6.1-sol", "sol-6.1"),
                 ("gpt-6.1-terra", "terra"),
                 ("gpt-6-luna", "luna"),
                 ("deepseek-ai/DeepSeek-V4.1-Flash-1017", "dsf"),
@@ -1137,8 +1139,16 @@ mod tests {
         );
         assert_eq!(
             boblm_tuning::model_display("gpt-6.1-sol"),
-            "sol (gpt-6.1-sol)"
+            "sol-6.1 (gpt-6.1-sol)"
         );
+        assert_eq!(
+            boblm_tuning::model_display("gpt-6.2-sol"),
+            "sol (gpt-6.2-sol)"
+        );
+        for id in ["gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-astra"] {
+            assert_eq!(check_choice(id, Some("max")), Ok(Agent::Codex));
+            assert!(check_choice(id, Some("ultra")).is_err());
+        }
         assert_eq!(boblm_tuning::model_display("haiku"), "haiku");
         assert_eq!(check_choice("haiku", Some("high")), Ok(Agent::Claude));
         assert_eq!(

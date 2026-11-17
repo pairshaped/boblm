@@ -1183,7 +1183,7 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
     let first_id = "00000000-0000-4000-8000-000000000101";
     let args = serde_json::json!({"title":"Spawned chat","requestId":first_id,"message":"implement this","role":"implementer","difficulty":"simple"});
     let first = tool_value(&call(&router, token, "caller", "spawn_subagent", args.clone()).await);
-    assert_eq!(first["routing"]["model"], "gpt-6.1-sol");
+    assert_eq!(first["routing"]["model"], boblm_tuning::MODEL_GPT_6_2_SOL);
     assert_eq!(first["routing"]["effort"], "medium");
     assert_eq!(first["routing"]["account"], "codex-plan");
     assert_eq!(first["routing"]["step"], "implementer-codex-plan");
@@ -1243,7 +1243,10 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
         .unwrap();
     let repeated = tool_value(&call(&router, token, "caller", "spawn_subagent", args).await);
     assert_eq!(repeated["alreadyAccepted"], true);
-    assert_eq!(repeated["routing"]["model"], "gpt-6.1-sol");
+    assert_eq!(
+        repeated["routing"]["model"],
+        boblm_tuning::MODEL_GPT_6_2_SOL
+    );
     assert_eq!(repeated["routing"]["step"], "implementer-codex-plan");
 
     let nested = call(
@@ -1528,7 +1531,7 @@ async fn role_spawn_peer_creates_a_visible_root_with_the_resolved_choice() {
     let id = "00000000-0000-4000-8000-000000000201";
     let args = serde_json::json!({"title":"Spawned chat","requestId":id,"message":"implement this","role":"implementer","difficulty":"hard"});
     let spawned = tool_value(&call(&router, token, "caller", "spawn_peer", args.clone()).await);
-    assert_eq!(spawned["routing"]["model"], "gpt-6.1-sol");
+    assert_eq!(spawned["routing"]["model"], boblm_tuning::MODEL_GPT_6_2_SOL);
     assert_eq!(spawned["routing"]["effort"], "high");
     assert_eq!(spawned["routing"]["step"], "implementer-codex-plan");
     assert_eq!(spawned["session"]["name"], "Spawned chat");
@@ -1537,7 +1540,10 @@ async fn role_spawn_peer_creates_a_visible_root_with_the_resolved_choice() {
     assert_eq!(spawned["session"]["role"], "implementer");
     let repeated = tool_value(&call(&router, token, "caller", "spawn_peer", args).await);
     assert_eq!(repeated["alreadyAccepted"], true);
-    assert_eq!(repeated["routing"]["model"], "gpt-6.1-sol");
+    assert_eq!(
+        repeated["routing"]["model"],
+        boblm_tuning::MODEL_GPT_6_2_SOL
+    );
 
     let both = call(
         &router,
@@ -3163,7 +3169,7 @@ fn implementer_routes_across_plan_resets() {
             if route.account == AccountKind::ClaudePlan {
                 boblm_tuning::MODEL_SONNET
             } else {
-                boblm_tuning::MODEL_GPT_6_1_SOL
+                boblm_tuning::MODEL_GPT_6_2_SOL
             }
         );
         if expected == A {

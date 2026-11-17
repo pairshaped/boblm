@@ -26,7 +26,7 @@ Implementers take a difficulty of `simple` or `hard`. Default to `simple` (mediu
 effort). Use `hard` only when the task is clearly complex: concurrency, delivery
 or state-machine logic, payments, auth or credentials, risky migrations, or subtle
 cross-module design. Choose the available plan whose weekly allowance resets first,
-regardless of provider: Sol on the Codex plan or Sonnet on a Claude plan, at medium
+regardless of provider: Sol 6.2 on the Codex plan or Sonnet on a Claude plan, at medium
 or high effort. Claude accounts retain their 2% cutoff and per-account caps (ADR
 0047). Compare Codex with the eligible account selected by Claude's reset-first
 selection. Known future resets sort before unknown or expired readings. Ties and
@@ -62,7 +62,7 @@ remain readable. Reviewers do independent code review; implementers own
 implementation and repairs.
 
 `CODEX_PLAN_ROUTING_ENABLED` and `OPENAI_API_ROUTING_ENABLED` are documented
-tunables, both true. Disabling the first skips the Sol plan step;
+tunables, both true. Disabling the first skips the Sol 6.2 plan step;
 disabling the second skips Luna API reviews. The route reason names the flag,
 for example "disabled by CODEX_PLAN_ROUTING_ENABLED". Drivers, the model catalog
 and explicit model choices keep working. There is no settings screen (ADR 0018).
@@ -177,7 +177,7 @@ The caps are `OPENAI_API_MAX_ACTIVE_REVIEWERS` (4) for Luna API,
 `MAX_OPEN_HAIKU_API_AGENTS` (3) per Claude API account,
 `MAX_OPEN_CODEX_PLAN_AGENTS` (10), `MAX_OPEN_CLAUDE_PLAN_AGENTS` (10) per Claude
 plan account, and `MAX_OPEN_DSF_API_AGENTS` (5).
-Codex plan includes Sol implementers. Reviewers are never routed there, though any open
+Codex plan includes Sol 6.2 implementers. Reviewers are never routed there, though any open
 session already on the Codex plan still counts toward its cap.
 Claude plan includes Sonnet implementers and Opus planners, with independent caps
 for accounts A and B. Haiku API also has independent caps for accounts A and B.

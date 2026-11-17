@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Behavior test for bin/check-codex-models against a fake `codex app-server`.
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+work=$(mktemp -d "$here/../target/check-codex-models-test.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+fail() { echo "FAIL: $*"; exit 1; }
+
+cat > "$work/codex" <<'PY'
+#!/usr/bin/env python3
+import json, os, sys
+ids = os.environ["FAKE_IDS"].split(",")
+for line in sys.stdin:
+    m = json.loads(line)
+    if m.get("method") == "initialize":
+        assert m["params"]["clientInfo"]["name"] == "boblm"
+        assert m["params"]["capabilities"]["experimentalApi"] is True
+        print(json.dumps({"id": m["id"], "result": {}}), flush=True)
+    elif m.get("method") == "model/list":
+        assert m["params"]["includeHidden"] is False
+        data = [{"id": i, "model": i, "isDefault": i == ids[0]} for i in ids]
+        print(json.dumps({"id": m["id"], "result": {"data": data}}), flush=True)
+PY
+chmod +x "$work/codex"
+export CODEX_BIN="$work/codex"
+all="gpt-6.2-sol,gpt-6.2-astra,gpt-6.1-sol,gpt-6.1-terra,gpt-6-luna,gpt-5.6-sol"
+
+out=$(FAKE_IDS="$all,gpt-7-sol" "$here/check-codex-models") || fail "full list should exit 0: $out"
+[[ $out == *"NEW: Codex lists gpt-7-sol"* ]] || fail "new model not reported: $out"
+[[ $out == *"matches"* ]] || fail "default not matched: $out"
+[[ $out != *"gpt-5.6-sol but"* ]] || fail "5.x model reported: $out"
+
+if out=$(FAKE_IDS="gpt-6.2-sol,gpt-6-luna" "$here/check-codex-models"); then fail "missing model should exit 1"; fi
+[[ $out == *"MISSING: the catalog offers gpt-6.2-astra"* ]] || fail "missing model not reported: $out"
+
+echo "check-codex-models: ok"

@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Compare BobLM's Codex model catalog with what `codex app-server` lists (read-only).
+
+Starts `$CODEX_BIN app-server` (default `codex`), does the same initialize handshake as the
+driver, calls model/list with includeHidden false, and compares ids with the Codex entries of
+MODELS in crates/tuning/src/lib.rs. Exit 0 when every catalog Codex model is listed, else 1.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+from pathlib import Path
+
+SRC = Path(__file__).resolve().parent.parent / "crates/tuning/src/lib.rs"
+TIMEOUT = 30
+
+
+def catalog(src):
+    consts = dict(re.findall(r'pub const (\w+): &str = "([^"]*)";', src))
+    body = src.split("pub const MODELS", 1)[1].split("];", 1)[0]
+    ids = []
+    for block in re.findall(r"ModelSpec \{(.*?)\}", body, re.S):
+        ident = re.search(r"id:\s*(\w+)", block).group(1)
+        if re.search(r'agent:\s*"codex"', block):
+            ids.append(consts[ident])
+    default = re.search(r"CODEX_DEFAULT_MODEL: &str = (\w+|\"[^\"]*\");", src).group(1)
+    default = default.strip('"') if default.startswith('"') else consts[default]
+    return ids, default
+
+
+def main():
+    ids, default = catalog(SRC.read_text())
+    binary = os.environ.get("CODEX_BIN", "codex")
+    try:
+        proc = subprocess.Popen(
+            [binary, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True,
+        )
+    except OSError as why:
+        print(f"Could not start {binary}: {why}. Install Codex or set CODEX_BIN.")
+        return 2
+    timer = threading.Timer(TIMEOUT, proc.kill)
+    timer.start()
+
+    def rpc(rid, method, params):
+        proc.stdin.write(json.dumps({"id": rid, "method": method, "params": params}) + "\n")
+        proc.stdin.flush()
+        for line in proc.stdout:
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if msg.get("id") == rid and ("result" in msg or "error" in msg):
+                if "error" in msg:
+                    raise RuntimeError(f"{method} failed: {msg['error']}")
+                return msg["result"]
+        raise RuntimeError(f"Codex closed or timed out before answering {method}.")
+
+    try:
+        rpc(1, "initialize", {
+            "clientInfo": {"name": "boblm", "title": "boblm", "version": "check"},
+            "capabilities": {"experimentalApi": True},
+        })
+        proc.stdin.write(json.dumps({"method": "initialized"}) + "\n")
+        result = rpc(2, "model/list", {"includeHidden": False})
+    except (RuntimeError, OSError) as why:
+        print(f"Could not read the Codex model list: {why}")
+        return 2
+    finally:
+        timer.cancel()
+        proc.kill()
+        proc.wait()
+
+    listed = result.get("data") or result.get("models") or []
+    server = [m.get("model") or m.get("id") for m in listed]
+    server_default = next((m.get("model") or m.get("id") for m in listed if m.get("isDefault")), None)
+    missing = [i for i in ids if i not in server]
+    extra = [i for i in server if i not in ids and not re.match(r"gpt-5", i or "")]
+    for i in missing:
+        print(f"MISSING: the catalog offers {i} but Codex no longer lists it.")
+    for i in extra:
+        print(f"NEW: Codex lists {i} but the catalog lacks it.")
+    note = "matches" if server_default == default else "differs from"
+    print(f"Codex default is {server_default}; CODEX_DEFAULT_MODEL is {default} ({note}).")
+    if not missing:
+        print("Every catalog Codex model is listed by the server.")
+    return 1 if missing else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

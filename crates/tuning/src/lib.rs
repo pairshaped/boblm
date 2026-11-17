@@ -147,7 +147,7 @@ pub const CODEX_API_PROVIDER_ID: &str = "boblm-openai-api";
 /// Codex executable the driver launches (looked up on PATH).
 pub const CODEX_BINARY: &str = "codex";
 /// Model a new Codex chat starts with.
-pub const CODEX_DEFAULT_MODEL: &str = "gpt-6.1-sol";
+pub const CODEX_DEFAULT_MODEL: &str = MODEL_GPT_6_2_SOL;
 /// Instructions given to Codex so it never waits on the owner; the same text Claude gets.
 pub const CODEX_DEVELOPER_INSTRUCTIONS: &str = CLAUDE_SYSTEM_PROMPT_APPEND;
 /// Efforts the smaller Codex models accept.
@@ -347,10 +347,14 @@ pub fn provider_group(
 
 /// Model ID for DeepSeek V4.1 Flash 1017, used by Pi for explicit-model chats.
 pub const MODEL_DEEPSEEK_V41_FLASH: &str = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
-/// Model ID for GPT-6.1 Sol, used by the Codex routing steps.
+/// Model ID for GPT-6.1 Sol, kept so chats that stored it stay usable.
 pub const MODEL_GPT_6_1_SOL: &str = "gpt-6.1-sol";
 /// Model ID for GPT-6.1 Terra.
 pub const MODEL_GPT_6_1_TERRA: &str = "gpt-6.1-terra";
+/// Model ID for GPT-6.2 Astra, offered in the catalog only (no role routes to it).
+pub const MODEL_GPT_6_2_ASTRA: &str = "gpt-6.2-astra";
+/// Model ID for GPT-6.2 Sol, the Codex default and the implementer plan step's model.
+pub const MODEL_GPT_6_2_SOL: &str = "gpt-6.2-sol";
 /// Model ID for GPT-6 Luna, used by the reviewer API step.
 pub const MODEL_GPT_6_LUNA: &str = "gpt-6-luna";
 /// Claude Code alias for the current Claude Fable model (Fable 5.2).
@@ -389,8 +393,20 @@ pub const MODELS: &[ModelSpec] = &[
         efforts: CLAUDE_EFFORTS,
     },
     ModelSpec {
-        id: MODEL_GPT_6_1_SOL,
+        id: MODEL_GPT_6_2_SOL,
         label: "sol",
+        agent: "codex",
+        efforts: CODEX_EFFORTS,
+    },
+    ModelSpec {
+        id: MODEL_GPT_6_2_ASTRA,
+        label: "astra",
+        agent: "codex",
+        efforts: CODEX_EFFORTS,
+    },
+    ModelSpec {
+        id: MODEL_GPT_6_1_SOL,
+        label: "sol-6.1",
         agent: "codex",
         efforts: CODEX_EFFORTS,
     },
