@@ -193,8 +193,8 @@ pub const IMPLEMENTER_STEPS: &[RoleStep] = &[
     RoleStep {
         id: StepId::ImplementerCodexPlan,
         model: MODEL_GPT_6_2_SOL,
-        simple_effort: ROLE_IMPLEMENTER_SIMPLE_EFFORT,
-        hard_effort: ROLE_IMPLEMENTER_HARD_EFFORT,
+        simple_effort: ROLE_IMPLEMENTER_CODEX_EFFORT,
+        hard_effort: ROLE_IMPLEMENTER_CODEX_EFFORT,
         account: AccountKind::CodexPlan,
     },
     RoleStep {
@@ -1075,7 +1075,9 @@ mod tests {
                         if role == Role::Implementer {
                             assert_eq!(
                                 route.effort,
-                                if difficulty == Difficulty::Simple {
+                                if step == StepId::ImplementerCodexPlan {
+                                    ROLE_IMPLEMENTER_CODEX_EFFORT
+                                } else if difficulty == Difficulty::Simple {
                                     ROLE_IMPLEMENTER_SIMPLE_EFFORT
                                 } else {
                                     ROLE_IMPLEMENTER_HARD_EFFORT
@@ -1196,7 +1198,7 @@ mod tests {
         };
         assert_eq!(chosen.step, StepId::ImplementerCodexPlan);
         assert_eq!(chosen.model, MODEL_GPT_6_2_SOL);
-        assert_eq!(chosen.effort, ROLE_IMPLEMENTER_SIMPLE_EFFORT);
+        assert_eq!(chosen.effort, ROLE_IMPLEMENTER_CODEX_EFFORT);
 
         let chosen = resolve(
             Role::Implementer,
@@ -1209,7 +1211,7 @@ mod tests {
         let RouteOutcome::Chosen(chosen) = chosen else {
             panic!("{chosen:?}")
         };
-        assert_eq!(chosen.effort, ROLE_IMPLEMENTER_HARD_EFFORT);
+        assert_eq!(chosen.effort, ROLE_IMPLEMENTER_CODEX_EFFORT);
 
         let chosen = resolve(
             Role::Reviewer,
@@ -1225,6 +1227,48 @@ mod tests {
         assert_eq!(chosen.step, StepId::ReviewerOpenAiApi);
         assert_eq!(chosen.model, MODEL_GPT_6_LUNA);
         assert_eq!(chosen.effort, ROLE_REVIEWER_LUNA_EFFORT);
+    }
+
+    #[test]
+    fn codex_implementer_effort_ignores_difficulty_but_sonnet_follows_it() {
+        let now = 1_000;
+        for (difficulty, sonnet_effort) in [
+            (Difficulty::Simple, ROLE_IMPLEMENTER_SIMPLE_EFFORT),
+            (Difficulty::Hard, ROLE_IMPLEMENTER_HARD_EFFORT),
+        ] {
+            let RouteOutcome::Chosen(codex) = resolve(
+                Role::Implementer,
+                difficulty,
+                &[],
+                &[],
+                ApiHeadroom::default(),
+                now,
+            ) else {
+                panic!()
+            };
+            assert_eq!(codex.step, StepId::ImplementerCodexPlan);
+            assert_eq!(codex.effort, ROLE_IMPLEMENTER_CODEX_EFFORT);
+
+            let RouteOutcome::Chosen(sonnet) = resolve_with(
+                Role::Implementer,
+                difficulty,
+                &[],
+                &[],
+                ApiHeadroom::default(),
+                now,
+                (
+                    |step| matches!(step, StepId::ImplementerClaude),
+                    CODEX_PLAN_ROUTING_ENABLED,
+                    OPENAI_API_ROUTING_ENABLED,
+                ),
+            ) else {
+                panic!()
+            };
+            assert_eq!(sonnet.step, StepId::ImplementerClaude);
+            assert_eq!(sonnet.effort, sonnet_effort);
+        }
+        assert_eq!(ROLE_IMPLEMENTER_SIMPLE_EFFORT, "medium");
+        assert_eq!(ROLE_IMPLEMENTER_HARD_EFFORT, "high");
     }
 
     #[test]

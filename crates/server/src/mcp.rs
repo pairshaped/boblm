@@ -160,7 +160,7 @@ struct SpawnArgs {
     effort: Option<String>,
     /// implementer, reviewer or planner. An alternative to model and effort.
     role: Option<String>,
-    /// Required only for implementers. Default to simple (medium effort). Use hard only for clearly complex concurrency, delivery, state machines, payments, auth, credentials, risky migrations or cross-module design.
+    /// Required only for implementers. Default to simple. Use hard only for clearly complex concurrency, delivery, state machines, payments, auth, credentials, risky migrations or cross-module design. On Sol difficulty does not change effort (high either way); on the Sonnet fallback simple is medium and hard is high.
     difficulty: Option<String>,
     /// The project to create the chat in, from list_projects. Omit or null for your own project.
     project_id: Option<String>,
@@ -175,7 +175,7 @@ struct SpawnSubagentArgs {
     message: String,
     /// implementer, reviewer or planner.
     role: String,
-    /// Required only for implementers. Default to simple (medium effort). Use hard only for clearly complex concurrency, delivery, state machines, payments, auth, credentials, risky migrations or cross-module design.
+    /// Required only for implementers. Default to simple. Use hard only for clearly complex concurrency, delivery, state machines, payments, auth, credentials, risky migrations or cross-module design. On Sol difficulty does not change effort (high either way); on the Sonnet fallback simple is medium and hard is high.
     difficulty: Option<String>,
     /// Optional folder inside your project. Defaults to your working folder.
     working_directory: Option<String>,

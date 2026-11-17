@@ -1184,7 +1184,10 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
     let args = serde_json::json!({"title":"Spawned chat","requestId":first_id,"message":"implement this","role":"implementer","difficulty":"simple"});
     let first = tool_value(&call(&router, token, "caller", "spawn_subagent", args.clone()).await);
     assert_eq!(first["routing"]["model"], boblm_tuning::MODEL_GPT_6_2_SOL);
-    assert_eq!(first["routing"]["effort"], "medium");
+    assert_eq!(
+        first["routing"]["effort"],
+        boblm_tuning::ROLE_IMPLEMENTER_CODEX_EFFORT
+    );
     assert_eq!(first["routing"]["account"], "codex-plan");
     assert_eq!(first["routing"]["step"], "implementer-codex-plan");
     assert_eq!(first["session"]["parentSessionId"], "caller");

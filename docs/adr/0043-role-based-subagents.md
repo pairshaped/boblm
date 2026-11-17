@@ -22,12 +22,11 @@ one on their own initiative or because a workflow or skill says to plan. This is
 agent guidance, not a server check: BobLM cannot determine who requested it.
 
 
-Implementers take a difficulty of `simple` or `hard`. Default to `simple` (medium
-effort). Use `hard` only when the task is clearly complex: concurrency, delivery
+Implementers take a difficulty of `simple` or `hard`. Default to `simple`. Use `hard` only when the task is clearly complex: concurrency, delivery
 or state-machine logic, payments, auth or credentials, risky migrations, or subtle
 cross-module design. Choose the available plan whose weekly allowance resets first,
-regardless of provider: Sol 6.2 on the Codex plan or Sonnet on a Claude plan, at medium
-or high effort. Claude accounts retain their 2% cutoff and per-account caps (ADR
+regardless of provider: Sol 6.2 on the Codex plan or Sonnet on a Claude plan. Sol 6.2 runs
+at high effort for either difficulty; Sonnet runs simple at medium and hard at high. Claude accounts retain their 2% cutoff and per-account caps (ADR
 0047). Compare Codex with the eligible account selected by Claude's reset-first
 selection. Known future resets sort before unknown or expired readings. Ties and
 unknowns retain table order: Codex before Claude, and Claude A before B.
