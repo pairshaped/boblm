@@ -339,6 +339,7 @@ impl App {
             )
             .route("/commands/sendMessage", post(send_message))
             .route("/commands/setModel", post(set_model))
+            .route("/commands/setIdleNudge", post(set_idle_nudge))
             .route("/commands/retryMessage", post(retry_message))
             .route("/commands/stopSession", post(stop_session))
             .route("/commands/archiveSession", post(archive_session))
@@ -479,6 +480,7 @@ impl App {
             parent_session_id: session.parent_session_id,
             root_session_id: session.root_session_id,
             role: session.role,
+            idle_nudge_enabled: subagents.is_some().then_some(session.idle_nudge_enabled),
             subagents,
             created_at: session.created_at,
             status,
@@ -1063,6 +1065,21 @@ async fn set_model(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<Comma
     Ok(Json(CommandResponse {
         status: wire_status(handle.status().await?)?,
     }))
+}
+async fn set_idle_nudge(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<Empty> {
+    let request: SetIdleNudge = body(&bytes)?;
+    let store = app.store.clone();
+    let updated = tokio::task::spawn_blocking(move || {
+        store.set_idle_nudge_enabled(&request.session_id, request.enabled)
+    })
+    .await
+    .map_err(ApiError::internal)??;
+    if !updated {
+        return Err(ApiError::invalid(
+            "Idle nudges are only available for root chats. Open the parent chat to change its preference.",
+        ));
+    }
+    Ok(Json(Empty {}))
 }
 async fn retry_message(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<CommandResponse> {
     let request: RetryMessage = body(&bytes)?;

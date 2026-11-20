@@ -167,6 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "AttachmentInfo",
         "RetryMessage",
         "SetModel",
+        "SetIdleNudge",
         "MoveClaudeAccount",
         "MoveClaudeAccountReply",
         "AddProject",
@@ -276,6 +277,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         parent_session_id: None,
         root_session_id: None,
         role: None,
+        idle_nudge_enabled: Some(true),
         subagents: Some(SubagentSummary {
             open: 2,
             questions: 1,
@@ -320,6 +322,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "SetModel",
             json!({"sessionId":"s","model":"opus","effort":"high"}),
         ),
+        ("SetIdleNudge", json!({"sessionId":"s","enabled":false})),
         (
             "MoveClaudeAccount",
             json!({"sessionId":"s","accountKey":"claude-plan-a"}),
@@ -441,6 +444,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
         ("renamed", json!({"name":"Work"})),
         ("archived", json!({"archived":true})),
+        ("idle_nudge_changed", json!({"enabled":false})),
         ("state_summary", serde_json::to_value(&status)?),
         ("subagents_changed", json!({})),
         ("questions_changed", json!({})),

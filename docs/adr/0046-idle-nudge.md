@@ -7,6 +7,20 @@ so enabling the nudge needs no runner replacement or transport change.
 Subagent results do not create nudge opportunities: their reports wake the parent,
 which decides what to do.
 
+## Chat preference
+
+Idle nudges are on by default for existing and new root chats. The **Idle
+nudges** button in the chat header turns them off or on for that chat across
+devices. The preference survives archive, reopen and server restart.
+
+The result trigger reads the stored preference before creating an opportunity.
+Turning nudges off drops pending opportunities, including deferred checks, and
+cancels nudge messages that are still queued. A nudge whose dispatch the runner
+already claimed may still arrive. Changing the preference and canceling queued
+nudges happen in one transaction, so an interrupted handoff cannot revive them.
+Turning nudges back on makes future turn results eligible. It never replays
+results from before or during the opt-out.
+
 ## Turn origin
 
 The first fresh consumption acknowledgment between the previous result and this

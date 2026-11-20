@@ -128,7 +128,7 @@ pub enum DeliveryState {
     Started,
     Rejected,
     Uncertain,
-    /// Waited past QUEUED_MESSAGE_MAX_AGE and was never sent.
+    /// Removed from the delivery queue before confirmed consumption.
     Expired,
 }
 /// The state an expired message was in when it expired.
@@ -139,6 +139,11 @@ pub enum ExpiredFrom {
     /// The agent never confirmed it, so it may already have been received.
     Uncertain,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpiryReason {
+    IdleNudgeDisabled,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Empty {}
@@ -147,6 +152,18 @@ pub struct Empty {}
 pub struct SessionRef {
     #[schemars(length(min = 1, max = boblm_tuning::MAX_SESSION_ID_CHARS), regex(pattern = "\\S"))]
     pub session_id: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SetIdleNudge {
+    #[schemars(length(min = 1, max = boblm_tuning::MAX_SESSION_ID_CHARS), regex(pattern = "\\S"))]
+    pub session_id: String,
+    pub enabled: bool,
+}
+impl CommandBody for SetIdleNudge {
+    fn validate(&self) -> Result<(), String> {
+        check_session(&self.session_id)
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -744,6 +761,9 @@ pub struct SessionInfo {
     /// Present on a root chat; absent on a subagent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagents: Option<SubagentSummary>,
+    /// Present on root chats, which can opt out of idle nudges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_nudge_enabled: Option<bool>,
     pub created_at: i64,
     pub status: SessionStatus,
 }
@@ -764,6 +784,8 @@ pub struct MessageAppendedEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expired_from: Option<ExpiredFrom>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_reason: Option<ExpiryReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AttachmentInfo>,
@@ -775,6 +797,8 @@ pub struct DeliveryChangedEvent {
     pub delivery_state: DeliveryState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expired_from: Option<ExpiredFrom>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_reason: Option<ExpiryReason>,
     pub retry_count: Option<u8>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -894,6 +918,11 @@ pub struct SessionRenamedEvent {
     pub name: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IdleNudgeChangedEvent {
+    pub enabled: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -925,6 +954,12 @@ pub enum SessionListEvent {
         created_at: i64,
         payload: ArchiveChangedEvent,
     },
+    IdleNudgeChanged {
+        session_id: String,
+        seq: Sequence,
+        created_at: i64,
+        payload: IdleNudgeChangedEvent,
+    },
     StateSummary {
         session_id: String,
         seq: Sequence,
@@ -953,6 +988,7 @@ impl SessionListEvent {
             | Self::Created { seq, .. }
             | Self::Renamed { seq, .. }
             | Self::Archived { seq, .. }
+            | Self::IdleNudgeChanged { seq, .. }
             | Self::StateSummary { seq, .. }
             | Self::QuestionsChanged { seq, .. }
             | Self::SubagentsChanged { seq, .. } => *seq,
@@ -965,6 +1001,7 @@ pub struct ContractSchemas {
     session_list_event: SessionListEvent,
     empty: Empty,
     session_ref: SessionRef,
+    set_idle_nudge: SetIdleNudge,
     subagent_history: SubagentHistory,
     subagent_history_page: SubagentHistoryPage,
     create_session: CreateSession,

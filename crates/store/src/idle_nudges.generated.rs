@@ -5,6 +5,57 @@ use rusqlite::{Connection, Result, params};
 use marmot::MutationConnection;
 
 #[derive(Debug)]
+pub struct SetEnabledParams<'a> {
+    pub enabled: bool,
+    pub session: &'a str,
+}
+
+const SET_ENABLED_SQL: &str = r"UPDATE sessions SET idle_nudge_enabled = ?1
+WHERE id = ?2 AND parent_session_id IS NULL AND root_session_id IS NULL";
+
+pub fn set_enabled(conn: impl MutationConnection, params: SetEnabledParams<'_>) -> Result<usize> {
+    let conn = conn.as_connection();
+    conn.execute(SET_ENABLED_SQL, params![params.enabled, params.session])
+}
+
+#[derive(Debug)]
+pub struct DropOutstandingParams<'a> {
+    pub session: &'a str,
+}
+
+const DROP_OUTSTANDING_SQL: &str = r"UPDATE idle_nudges SET state = 'dropped', recheck_at = NULL
+WHERE session = ?1 AND state IN ('pending', 'queued')";
+
+pub fn drop_outstanding(
+    conn: impl MutationConnection,
+    params: DropOutstandingParams<'_>,
+) -> Result<usize> {
+    let conn = conn.as_connection();
+    conn.execute(DROP_OUTSTANDING_SQL, params![params.session])
+}
+
+#[derive(Debug)]
+pub struct ExpireQueuedMessagesParams<'a> {
+    pub now: Option<i64>,
+    pub session: &'a str,
+}
+
+const EXPIRE_QUEUED_MESSAGES_SQL: &str = r"UPDATE messages SET expired_at = ?1, expired_from = 'queued', expiry_reason = 'idle_nudge_disabled'
+WHERE session = ?2 AND delivery_state = 'queued' AND expired_at IS NULL
+ AND uuid IN (SELECT message_id FROM idle_nudges WHERE session = ?2 AND message_id IS NOT NULL)
+RETURNING uuid";
+
+pub fn expire_queued_messages(
+    conn: impl MutationConnection,
+    params: ExpireQueuedMessagesParams<'_>,
+) -> Result<Vec<String>> {
+    let conn = conn.as_connection();
+    let mut stmt = conn.prepare_cached(EXPIRE_QUEUED_MESSAGES_SQL)?;
+    let rows = stmt.query_map(params![params.now, params.session], |row| row.get(0))?;
+    rows.collect()
+}
+
+#[derive(Debug)]
 pub struct DueParams {
     pub cutoff: i64,
     pub now: i64,
@@ -90,6 +141,27 @@ pub fn settle(conn: impl MutationConnection, params: SettleParams<'_>) -> Result
             params.session,
             params.result_seq
         ],
+    )
+}
+
+#[derive(Debug)]
+pub struct FinishHandoffParams<'a> {
+    pub session: &'a str,
+    pub result_seq: i64,
+    pub message_id: &'a str,
+}
+
+const FINISH_HANDOFF_SQL: &str = r"UPDATE idle_nudges SET state = 'sent'
+WHERE session = ?1 AND result_seq = ?2 AND state = 'queued' AND message_id = ?3";
+
+pub fn finish_handoff(
+    conn: impl MutationConnection,
+    params: FinishHandoffParams<'_>,
+) -> Result<usize> {
+    let conn = conn.as_connection();
+    conn.execute(
+        FINISH_HANDOFF_SQL,
+        params![params.session, params.result_seq, params.message_id],
     )
 }
 

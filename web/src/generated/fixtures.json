@@ -87,6 +87,13 @@
     }
   },
   {
+    "type": "SetIdleNudge",
+    "value": {
+      "enabled": false,
+      "sessionId": "s"
+    }
+  },
+  {
     "type": "MoveClaudeAccount",
     "value": {
       "accountKey": "claude-plan-a",
@@ -309,6 +316,7 @@
           "agent": "claude",
           "agentSessionId": "claude-id",
           "createdAt": 1,
+          "idleNudgeEnabled": true,
           "name": "Fixture session",
           "projectId": "20000000-0000-4000-8000-000000000001",
           "sessionId": "s",
@@ -359,6 +367,7 @@
       "agent": "claude",
       "agentSessionId": "claude-id",
       "createdAt": 1,
+      "idleNudgeEnabled": true,
       "name": "Fixture session",
       "projectId": "20000000-0000-4000-8000-000000000001",
       "sessionId": "s",
@@ -614,6 +623,18 @@
       "kind": "archived",
       "payload": {
         "archived": true
+      },
+      "seq": 1,
+      "sessionId": "s"
+    }
+  },
+  {
+    "type": "SessionListEvent",
+    "value": {
+      "createdAt": 1,
+      "kind": "idle_nudge_changed",
+      "payload": {
+        "enabled": false
       },
       "seq": 1,
       "sessionId": "s"

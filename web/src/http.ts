@@ -44,6 +44,7 @@ export function parseCommandReply(name: string, value: unknown): unknown {
   if (
     name === "subscribePush" ||
     name === "unsubscribePush" ||
+    name === "setIdleNudge" ||
     name === "deleteSession" ||
     name === "removeProject" ||
     name === "reorderProjects" ||

@@ -1171,6 +1171,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn idle_nudge_opt_out_drops_deferred_and_skips_results_until_reenabled() {
+        let mut h = Harness::new().await;
+        let seq = h.job_turn().await;
+        let root = "root";
+        let now = h.due_time(seq);
+        let snapshot = job_snapshot(&["job"]);
+        h.store
+            .record_event(
+                root,
+                "agent_event",
+                serde_json::to_value(Event::BackgroundJobs {
+                    snapshot: snapshot.clone(),
+                })
+                .unwrap(),
+                now,
+            )
+            .unwrap();
+        publish_jobs(&h.handle, &h.events, snapshot).await;
+        h.app.run_idle_nudges(now).await.unwrap();
+        let reader = h.store.reader().unwrap();
+        assert!(reader.due_idle_nudges(now).unwrap().is_empty());
+        assert_eq!(reader.due_idle_nudges(i64::MAX).unwrap()[0].result_seq, seq);
+        assert!(h.store.set_idle_nudge_enabled(root, false).unwrap());
+        let reopened = Store::open(h.store.path()).unwrap();
+        assert!(!reopened.reader().unwrap().sessions().unwrap()[0].idle_nudge_enabled);
+        reopened
+            .record_event(
+                root,
+                "agent_event",
+                serde_json::json!({"type":"result"}),
+                now,
+            )
+            .unwrap();
+        assert!(reader.due_idle_nudges(i64::MAX).unwrap().is_empty());
+        assert!(reopened.set_idle_nudge_enabled(root, true).unwrap());
+        assert!(
+            reopened
+                .reader()
+                .unwrap()
+                .due_idle_nudges(i64::MAX)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(h.inputs.try_recv().is_err());
+        let later = h.job_turn().await;
+        h.app.run_idle_nudges(h.due_time(later)).await.unwrap();
+        assert_eq!(h.input().await.0, message_id(root, later));
+        assert_eq!(h.nudge_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn idle_nudge_opt_out_cancels_queued_input_even_after_handoff() {
+        for handed_off in [false, true] {
+            let mut h = Harness::new().await;
+            let seq = h.job_turn().await;
+            let id = message_id("root", seq);
+            let now = h.due_time(seq);
+            assert!(
+                h.store
+                    .prepare_idle_nudge("root", seq, &id, true, now)
+                    .unwrap()
+            );
+            if handed_off {
+                h.store.finish_idle_nudge("root", seq, &id).unwrap();
+            }
+            assert!(h.store.set_idle_nudge_enabled("root", false).unwrap());
+            assert!(!h.store.dispatch(&id, now, 0).unwrap());
+            assert!(
+                !h.handle
+                    .send_automated(&id, boblm_tuning::IDLE_NUDGE_TEXT)
+                    .await
+                    .unwrap()
+            );
+            h.store.finish_idle_nudge("root", seq, &id).unwrap();
+            assert!(h.store.set_idle_nudge_enabled("root", true).unwrap());
+            h.app.run_idle_nudges(now).await.unwrap();
+            assert!(h.inputs.try_recv().is_err());
+            let message = h.store.reader().unwrap().message(&id).unwrap().unwrap();
+            assert_eq!(message.delivery_state, "expired");
+        }
+    }
+
+    #[tokio::test]
     async fn idle_nudge_restart_acceptance_and_handoff_are_idempotent() {
         let mut h = Harness::new().await;
         let seq = h.job_turn().await;

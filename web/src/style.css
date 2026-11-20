@@ -51,7 +51,10 @@ button:hover {
   background: var(--color-control-hover);
 }
 .header-icon[aria-expanded="true"],
-.header-icon[aria-pressed="true"]:not(.notification-toggle) {
+.header-icon[aria-pressed="true"]:not(
+    .notification-toggle,
+    .idle-nudge-toggle
+  ) {
   background: var(--color-selected-bg);
   border-color: var(--color-selected-border);
 }

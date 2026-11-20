@@ -60,6 +60,46 @@ impl Reader {
 }
 
 impl Store {
+    /// Change a root chat's preference and settle any work that can still be canceled.
+    pub fn set_idle_nudge_enabled(&self, session: &str, enabled: bool) -> Result<bool> {
+        let mut conn = self.writer.lock().map_err(|_| crate::Error::Poisoned)?;
+        let tx = conn.transaction()?;
+        if sql::set_enabled(&tx, sql::SetEnabledParams { session, enabled })? == 0 {
+            return Ok(false);
+        }
+        let now = crate::events::now_ms();
+        if !enabled {
+            sql::drop_outstanding(&tx, sql::DropOutstandingParams { session })?;
+            for uuid in sql::expire_queued_messages(
+                &tx,
+                sql::ExpireQueuedMessagesParams {
+                    session,
+                    now: Some(now),
+                },
+            )? {
+                crate::events::append(
+                    &tx,
+                    session,
+                    "delivery_changed",
+                    serde_json::json!({
+                        "uuid": uuid, "delivery_state": "expired", "expired_from": "queued",
+                        "expiry_reason": "idle_nudge_disabled"
+                    }),
+                    now,
+                )?;
+            }
+        }
+        crate::session_list::append(
+            &tx,
+            session,
+            "idle_nudge_changed",
+            &serde_json::json!({ "enabled": enabled }),
+            now,
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Accept and settle together, so a crash cannot forget a drop or duplicate a message.
     /// The ordinary automated send subsequently refreshes the actor's queue using this UUID.
     pub fn prepare_idle_nudge(
@@ -159,13 +199,12 @@ impl Store {
         message_id: &str,
     ) -> Result<()> {
         let mut conn = self.writer.lock().map_err(|_| crate::Error::Poisoned)?;
-        sql::settle(
+        sql::finish_handoff(
             &mut *conn,
-            sql::SettleParams {
+            sql::FinishHandoffParams {
                 session,
                 result_seq,
-                state: "sent",
-                message_id: Some(message_id),
+                message_id,
             },
         )?;
         Ok(())

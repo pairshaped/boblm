@@ -22,7 +22,7 @@ export type ContextUsage = { readonly "usedTokens": number; readonly "windowToke
 export type CreateDirectory = { readonly "name": string; readonly "path": string; };
 export type CreateSession = { readonly "effort"?: string | null; readonly "model": string; readonly "name"?: string; readonly "projectId": string; readonly "sessionId": string; };
 export type CreditsReading = { readonly "balance"?: number | null; readonly "observedAt": number; };
-export type DeliveryChangedEvent = { readonly "delivery_state": DeliveryState; readonly "expired_from"?: (ExpiredFrom | null); readonly "retry_count"?: number | null; readonly "uuid": string; };
+export type DeliveryChangedEvent = { readonly "delivery_state": DeliveryState; readonly "expired_from"?: (ExpiredFrom | null); readonly "expiry_reason"?: (ExpiryReason | null); readonly "retry_count"?: number | null; readonly "uuid": string; };
 export type DeliveryRejectedEvent = { readonly "retry_available": boolean; readonly "uuid": string; };
 export type DeliveryState = ("queued" | "dispatching" | "started" | "rejected" | "uncertain" | "expired");
 export type DirectoryInfo = { readonly "name": string; readonly "path": string; };
@@ -33,12 +33,14 @@ export type Empty = Readonly<Record<string, never>>;
 export type ErrorInfo = { readonly "code": string; readonly "message": string; };
 export type EventPage = { readonly "cursor": Sequence; readonly "events": ReadonlyArray<StoredEvent>; readonly "hasMore": boolean; readonly "sessionId": string; readonly "status": SessionStatus; };
 export type ExpiredFrom = ("queued" | "uncertain");
+export type ExpiryReason = "idle_nudge_disabled";
+export type IdleNudgeChangedEvent = { readonly "enabled": boolean; };
 export type JobSnapshot = { readonly "available": boolean; readonly "tasks": ReadonlyArray<BackgroundJob>; };
 export type ListAccountUsage = Readonly<Record<string, never>>;
 export type ListDirectories = { readonly "path"?: string | null; };
 export type ListQuestions = Readonly<Record<string, never>>;
 export type ListSessionsResponse = { readonly "cursor"?: Sequence; readonly "models": ReadonlyArray<ModelOption>; readonly "projects": ReadonlyArray<ProjectInfo>; readonly "sessions": ReadonlyArray<SessionInfo>; };
-export type MessageAppendedEvent = { readonly "attachments"?: ReadonlyArray<AttachmentInfo>; readonly "content": string; readonly "delivery_state": DeliveryState; readonly "expired_from"?: (ExpiredFrom | null); readonly "role": Role; readonly "sender_session_id"?: string | null; readonly "uuid": string; };
+export type MessageAppendedEvent = { readonly "attachments"?: ReadonlyArray<AttachmentInfo>; readonly "content": string; readonly "delivery_state": DeliveryState; readonly "expired_from"?: (ExpiredFrom | null); readonly "expiry_reason"?: (ExpiryReason | null); readonly "role": Role; readonly "sender_session_id"?: string | null; readonly "uuid": string; };
 export type ModelEffortChangedEvent = { readonly "effort"?: string | null; readonly "model": string; };
 export type ModelOption = { readonly "agent": Agent; readonly "efforts": ReadonlyArray<string>; readonly "label": string; readonly "model": string; };
 export type MoveClaudeAccount = { readonly "accountKey": string; readonly "sessionId": string; };
@@ -62,11 +64,12 @@ export type SendMessage = { readonly "attachments"?: ReadonlyArray<string>; read
 export type SendMessageResponse = { readonly "accepted": boolean; readonly "messageId": string; readonly "status": SessionStatus; };
 export type Sequence = number;
 export type SessionCreatedEvent = { readonly "id": string; readonly "parent_session_id"?: string | null; readonly "role"?: string | null; readonly "root_session_id"?: string | null; readonly "working_directory": string; };
-export type SessionInfo = { readonly "agent": Agent; readonly "agentSessionId"?: string | null; readonly "createdAt": number; readonly "name": string; readonly "parentSessionId"?: string | null; readonly "projectId": string; readonly "role"?: string | null; readonly "rootSessionId"?: string | null; readonly "sessionId": string; readonly "status": SessionStatus; readonly "subagents"?: (SubagentSummary | null); readonly "workingDirectory": string; };
-export type SessionListEvent = ({ readonly "createdAt": number; readonly "kind": "deleted"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "created"; readonly "payload": SessionCreatedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "renamed"; readonly "payload": SessionRenamedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "archived"; readonly "payload": ArchiveChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "state_summary"; readonly "payload": SessionStatus; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "questions_changed"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "subagents_changed"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; });
+export type SessionInfo = { readonly "agent": Agent; readonly "agentSessionId"?: string | null; readonly "createdAt": number; readonly "idleNudgeEnabled"?: boolean | null; readonly "name": string; readonly "parentSessionId"?: string | null; readonly "projectId": string; readonly "role"?: string | null; readonly "rootSessionId"?: string | null; readonly "sessionId": string; readonly "status": SessionStatus; readonly "subagents"?: (SubagentSummary | null); readonly "workingDirectory": string; };
+export type SessionListEvent = ({ readonly "createdAt": number; readonly "kind": "deleted"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "created"; readonly "payload": SessionCreatedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "renamed"; readonly "payload": SessionRenamedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "archived"; readonly "payload": ArchiveChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "idle_nudge_changed"; readonly "payload": IdleNudgeChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "state_summary"; readonly "payload": SessionStatus; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "questions_changed"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "subagents_changed"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; });
 export type SessionRef = { readonly "sessionId": string; };
 export type SessionRenamedEvent = { readonly "name": string; };
 export type SessionStatus = { readonly "accountKey"?: string | null; readonly "accountUsage"?: (AccountUsage | null); readonly "archived": boolean; readonly "dispatching": number; readonly "effort"?: string | null; readonly "heldReason"?: string | null; readonly "jobs"?: (JobSnapshot | null); readonly "model": string; readonly "promptSuggestion"?: string | null; readonly "queueHeld": boolean; readonly "queued": number; readonly "rejected": number; readonly "running": boolean; readonly "selectionPending": boolean; readonly "stopping": boolean; readonly "turnActive": boolean; readonly "uncertain": number; readonly "usage"?: (UsageSnapshot | null); };
+export type SetIdleNudge = { readonly "enabled": boolean; readonly "sessionId": string; };
 export type SetModel = { readonly "effort"?: string | null; readonly "model": string; readonly "sessionId": string; };
 export type StoredEvent = ({ readonly "createdAt": number; readonly "kind": "session_renamed"; readonly "payload": SessionRenamedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "session_created"; readonly "payload": SessionCreatedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "message_appended"; readonly "payload": MessageAppendedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "delivery_changed"; readonly "payload": DeliveryChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "agent_session_changed"; readonly "payload": AgentSessionChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "archive_changed"; readonly "payload": ArchiveChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "model_effort_changed"; readonly "payload": ModelEffortChangedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "delivery_rejected"; readonly "payload": DeliveryRejectedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "agent_event"; readonly "payload": JsonValue; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "driver_error"; readonly "payload": DriverErrorEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "model_error"; readonly "payload": DriverErrorEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "state_summary"; readonly "payload": SessionStatus; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "session_stopping"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "session_stopped"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "delivery_timeout"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "stop_timeout"; readonly "payload": Empty; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "questions_changed"; readonly "payload": JsonValue; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "secret_requested"; readonly "payload": SecretRequestedEvent; readonly "seq": Sequence; readonly "sessionId": string; } | { readonly "createdAt": number; readonly "kind": "secret_resolved"; readonly "payload": SecretResolvedEvent; readonly "seq": Sequence; readonly "sessionId": string; });
 export type SubagentHistory = { readonly "agentKey": string; readonly "before"?: (Sequence | null); readonly "sessionId": string; };
@@ -614,6 +617,16 @@ export const contractSchema = {
             }
           ]
         },
+        "expiry_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpiryReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "retry_count": {
           "format": "uint8",
           "maximum": 255,
@@ -663,7 +676,7 @@ export const contractSchema = {
         },
         {
           "const": "expired",
-          "description": "Waited past QUEUED_MESSAGE_MAX_AGE and was never sent.",
+          "description": "Removed from the delivery queue before confirmed consumption.",
           "type": "string"
         }
       ]
@@ -804,6 +817,24 @@ export const contractSchema = {
         }
       ]
     },
+    "ExpiryReason": {
+      "enum": [
+        "idle_nudge_disabled"
+      ],
+      "type": "string"
+    },
+    "IdleNudgeChangedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
     "JobSnapshot": {
       "additionalProperties": false,
       "properties": {
@@ -898,6 +929,16 @@ export const contractSchema = {
           "anyOf": [
             {
               "$ref": "#/$defs/ExpiredFrom"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiry_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpiryReason"
             },
             {
               "type": "null"
@@ -1423,6 +1464,13 @@ export const contractSchema = {
           "format": "int64",
           "type": "integer"
         },
+        "idleNudgeEnabled": {
+          "description": "Present on root chats, which can opt out of idle nudges.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         },
@@ -1584,6 +1632,36 @@ export const contractSchema = {
             },
             "payload": {
               "$ref": "#/$defs/ArchiveChangedEvent"
+            },
+            "seq": {
+              "$ref": "#/$defs/Sequence"
+            },
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "sessionId",
+            "seq",
+            "createdAt",
+            "payload"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "createdAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "kind": {
+              "const": "idle_nudge_changed",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/IdleNudgeChangedEvent"
             },
             "seq": {
               "$ref": "#/$defs/Sequence"
@@ -1836,6 +1914,25 @@ export const contractSchema = {
         "rejected",
         "archived",
         "model"
+      ],
+      "type": "object"
+    },
+    "SetIdleNudge": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "sessionId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "enabled"
       ],
       "type": "object"
     },
@@ -2729,6 +2826,9 @@ export const contractSchema = {
     "session_ref": {
       "$ref": "#/$defs/SessionRef"
     },
+    "set_idle_nudge": {
+      "$ref": "#/$defs/SetIdleNudge"
+    },
     "set_model": {
       "$ref": "#/$defs/SetModel"
     },
@@ -2752,6 +2852,7 @@ export const contractSchema = {
     "session_list_event",
     "empty",
     "session_ref",
+    "set_idle_nudge",
     "subagent_history",
     "subagent_history_page",
     "create_session",
@@ -2806,6 +2907,7 @@ export function parseSendMessage(value: unknown): SendMessage { return decode(co
 export function parseAttachmentInfo(value: unknown): AttachmentInfo { return decode(contractSchema, "AttachmentInfo", value) as AttachmentInfo; }
 export function parseRetryMessage(value: unknown): RetryMessage { return decode(contractSchema, "RetryMessage", value) as RetryMessage; }
 export function parseSetModel(value: unknown): SetModel { return decode(contractSchema, "SetModel", value) as SetModel; }
+export function parseSetIdleNudge(value: unknown): SetIdleNudge { return decode(contractSchema, "SetIdleNudge", value) as SetIdleNudge; }
 export function parseMoveClaudeAccount(value: unknown): MoveClaudeAccount { return decode(contractSchema, "MoveClaudeAccount", value) as MoveClaudeAccount; }
 export function parseMoveClaudeAccountReply(value: unknown): MoveClaudeAccountReply { return decode(contractSchema, "MoveClaudeAccountReply", value) as MoveClaudeAccountReply; }
 export function parseAddProject(value: unknown): AddProject { return decode(contractSchema, "AddProject", value) as AddProject; }

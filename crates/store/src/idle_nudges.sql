@@ -1,3 +1,17 @@
+-- func: set_enabled
+UPDATE sessions SET idle_nudge_enabled = @enabled
+WHERE id = @session AND parent_session_id IS NULL AND root_session_id IS NULL;
+
+-- func: drop_outstanding
+UPDATE idle_nudges SET state = 'dropped', recheck_at = NULL
+WHERE session = @session AND state IN ('pending', 'queued');
+
+-- func: expire_queued_messages
+UPDATE messages SET expired_at = @now, expired_from = 'queued', expiry_reason = 'idle_nudge_disabled'
+WHERE session = @session AND delivery_state = 'queued' AND expired_at IS NULL
+ AND uuid IN (SELECT message_id FROM idle_nudges WHERE session = @session AND message_id IS NOT NULL)
+RETURNING uuid;
+
 -- func: due
 SELECT session, result_seq, created_at, state, message_id FROM idle_nudges
 WHERE state = 'pending' AND recheck_at IS NULL AND created_at <= @cutoff
@@ -15,6 +29,10 @@ SELECT state, message_id FROM idle_nudges WHERE session = @session AND result_se
 -- func: settle
 UPDATE idle_nudges SET state = @state, message_id = @message_id
 WHERE session = @session AND result_seq = @result_seq;
+
+-- func: finish_handoff
+UPDATE idle_nudges SET state = 'sent'
+WHERE session = @session AND result_seq = @result_seq AND state = 'queued' AND message_id = @message_id;
 
 -- func: defer
 UPDATE idle_nudges SET recheck_at = @recheck_at

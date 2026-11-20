@@ -4,7 +4,7 @@ VALUES (@id, @name, @working_directory, @project_id, @agent, @model, @effort, @m
         (SELECT COALESCE(MAX(position), 0) + 1 FROM sessions WHERE project_id = @project_id));
 
 -- func: list
-SELECT id, working_directory, agent_session_id, created_at, archived, model, effort, name, applied_model, applied_effort, project_id, agent, account_id, parent_session_id, root_session_id, role, account_key FROM sessions ORDER BY position, id;
+SELECT id, working_directory, agent_session_id, created_at, archived, model, effort, name, applied_model, applied_effort, project_id, agent, account_id, parent_session_id, root_session_id, role, account_key, idle_nudge_enabled FROM sessions ORDER BY position, id;
 
 -- func: set_agent_session
 UPDATE sessions SET agent_session_id = @agent_session_id WHERE id = @id;

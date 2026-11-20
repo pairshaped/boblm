@@ -367,6 +367,7 @@ export type Msg =
   | { type: "createChat"; id: string }
   | { type: "command"; name: string }
   | { type: "commandOn"; name: string; sessionId: string }
+  | { type: "setIdleNudge"; sessionId: string; enabled: boolean }
   | { type: "choice"; model?: string; effort?: string | null }
   | { type: "event"; event: StoredEvent }
   | { type: "unknownEvent"; sessionId: string; seq: number }
@@ -2443,6 +2444,17 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
         model,
         [request(msg.name, { sessionId: msg.sessionId }, msg.sessionId)],
       ];
+    case "setIdleNudge":
+      return [
+        { ...model, error: "" },
+        [
+          request(
+            "setIdleNudge",
+            { sessionId: msg.sessionId, enabled: msg.enabled },
+            msg.sessionId,
+          ),
+        ],
+      ];
     case "choice": {
       const session = model.sessions.find((s) => s.sessionId === model.active);
       if (!session) return [model, []];
@@ -2562,6 +2574,19 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
       }
       if (msg.name === "deleteSession" && msg.outcome.kind === "replied")
         return forgetChat(model, msg.sessionId);
+      if (msg.name === "setIdleNudge") {
+        if (msg.outcome.kind === "replied") return [model, []];
+        return [
+          {
+            ...model,
+            error:
+              msg.outcome.kind === "rejected"
+                ? msg.outcome.error.message
+                : "The server’s reply about idle nudges was lost. Check the toggle before trying again.",
+          },
+          [listRequest(model)],
+        ];
+      }
       if (
         msg.name === "renameSession" &&
         model.renameChat?.sessionId === msg.sessionId
@@ -3000,6 +3025,26 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
       let next = { ...model, listCursor: e.seq };
       if (e.kind === "questions_changed")
         return step(next, { type: "reloadQuestions" });
+      if (e.kind === "idle_nudge_changed") {
+        const sessions = model.sessions.map((s) =>
+          s.sessionId === e.sessionId
+            ? { ...s, idleNudgeEnabled: e.payload.enabled }
+            : s,
+        );
+        return [
+          { ...next, sessions },
+          [
+            {
+              type: "persistList",
+              list: {
+                sessions,
+                projects: model.projects,
+                models: model.models,
+              },
+            },
+          ],
+        ];
+      }
       // A root's sidebar summary (open count, questions, failures) is computed by the
       // server and absent from live events. A child's archive, reopen, delete and turn change
       // refetch the list, as does the server's subagents_changed for what no other event
@@ -4167,6 +4212,7 @@ function connectionDialog(model: Model): VNode<Model> {
 export function view(model: Model): VNode<Model> {
   if (!model.token || model.connectionPending) return connectionDialog(model);
   const session = model.sessions.find((s) => s.sessionId === model.active);
+  const idleNudgeEnabled = session?.idleNudgeEnabled ?? true;
   const sending = !!(model.active && model.pending[model.active]);
   // The suggestion is an overlay, not a placeholder: Safari reads placeholder text
   // as a contact-field hint and offers AutoFill above the keyboard on iOS.
@@ -4636,6 +4682,46 @@ export function view(model: Model): VNode<Model> {
               )
             : null,
         ),
+        session &&
+          !session.status.archived &&
+          !session.parentSessionId &&
+          !session.rootSessionId
+          ? h(
+              "button",
+              {
+                type: "button",
+                class: "header-icon idle-nudge-toggle",
+                "aria-label": "Idle nudges",
+                "aria-pressed": String(idleNudgeEnabled),
+                title: idleNudgeEnabled
+                  ? "Turn off idle nudges for this chat"
+                  : "Turn on idle nudges for this chat",
+                onClick: on.clicked({
+                  type: "setIdleNudge",
+                  sessionId: session.sessionId,
+                  enabled: !idleNudgeEnabled,
+                }),
+              },
+              h(
+                "svg",
+                {
+                  viewBox: "0 0 24 24",
+                  width: 18,
+                  height: 18,
+                  fill: "none",
+                  stroke: "currentColor",
+                  "stroke-width": 1.8,
+                  "stroke-linecap": "round",
+                  "stroke-linejoin": "round",
+                  "aria-hidden": "true",
+                },
+                h("path", {
+                  d: "M20 15a8.5 8.5 0 0 1-11-11 8.5 8.5 0 1 0 11 11Z",
+                }),
+                idleNudgeEnabled ? null : h("path", { d: "m3 3 18 18" }),
+              ),
+            )
+          : null,
         session
           ? h(
               "button",
@@ -4873,7 +4959,9 @@ export function view(model: Model): VNode<Model> {
                                 role: "note",
                                 "data-expired-uuid": row.key,
                               },
-                              expiredNote(row.expiredFrom),
+                              row.idleNudgeCanceled
+                                ? "Idle nudge canceled before delivery because nudges were turned off."
+                                : expiredNote(row.expiredFrom),
                             )
                           : null,
                         row.text &&

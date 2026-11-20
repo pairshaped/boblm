@@ -60,7 +60,8 @@ FROM (SELECT payload FROM events WHERE session = @session AND seq > @start AND s
 SELECT name FROM tool_call_names WHERE session = @session AND id = @id;
 
 -- func: delivery
-SELECT CASE WHEN expired_at IS NOT NULL THEN 'expired' ELSE delivery_state END AS delivery_state, expired_from FROM messages WHERE uuid = @uuid AND session = @session;
+SELECT CASE WHEN expired_at IS NOT NULL THEN 'expired' ELSE delivery_state END AS delivery_state,
+ expired_from, expiry_reason FROM messages WHERE uuid = @uuid AND session = @session;
 
 -- func: pending_secrets
 SELECT e.session, e.seq, e.kind, e.payload, e.created_at FROM secret_requests r

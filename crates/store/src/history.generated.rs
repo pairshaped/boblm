@@ -182,12 +182,14 @@ pub struct DeliveryParams<'a> {
     pub session: &'a str,
 }
 
-const DELIVERY_SQL: &str = r"SELECT CASE WHEN expired_at IS NOT NULL THEN 'expired' ELSE delivery_state END AS delivery_state, expired_from FROM messages WHERE uuid = ?1 AND session = ?2";
+const DELIVERY_SQL: &str = r"SELECT CASE WHEN expired_at IS NOT NULL THEN 'expired' ELSE delivery_state END AS delivery_state,
+ expired_from, expiry_reason FROM messages WHERE uuid = ?1 AND session = ?2";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeliveryRow {
     pub delivery_state: String,
     pub expired_from: Option<String>,
+    pub expiry_reason: Option<String>,
 }
 
 pub fn delivery(conn: &Connection, params: DeliveryParams<'_>) -> Result<Vec<DeliveryRow>> {
@@ -196,6 +198,7 @@ pub fn delivery(conn: &Connection, params: DeliveryParams<'_>) -> Result<Vec<Del
         Ok(DeliveryRow {
             delivery_state: row.get(0)?,
             expired_from: row.get(1)?,
+            expiry_reason: row.get(2)?,
         })
     })?;
     rows.collect()

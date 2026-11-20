@@ -37,7 +37,7 @@ pub fn create(conn: impl MutationConnection, params: CreateParams<'_>) -> Result
     )
 }
 
-const LIST_SQL: &str = r"SELECT id, working_directory, agent_session_id, created_at, archived, model, effort, name, applied_model, applied_effort, project_id, agent, account_id, parent_session_id, root_session_id, role, account_key FROM sessions ORDER BY position, id";
+const LIST_SQL: &str = r"SELECT id, working_directory, agent_session_id, created_at, archived, model, effort, name, applied_model, applied_effort, project_id, agent, account_id, parent_session_id, root_session_id, role, account_key, idle_nudge_enabled FROM sessions ORDER BY position, id";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListRow {
@@ -58,6 +58,7 @@ pub struct ListRow {
     pub root_session_id: Option<String>,
     pub role: Option<String>,
     pub account_key: Option<String>,
+    pub idle_nudge_enabled: bool,
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<ListRow>> {
@@ -81,6 +82,7 @@ pub fn list(conn: &Connection) -> Result<Vec<ListRow>> {
             root_session_id: row.get(14)?,
             role: row.get(15)?,
             account_key: row.get(16)?,
+            idle_nudge_enabled: row.get(17)?,
         })
     })?;
     rows.collect()

@@ -199,6 +199,9 @@ fn hydrate_events(
                 if let Some(from) = row.expired_from {
                     payload["expired_from"] = from.into();
                 }
+                if let Some(reason) = row.expiry_reason {
+                    payload["expiry_reason"] = reason.into();
+                }
             }
         } else if e.kind == "agent_event" {
             if let Some(id) = payload["compaction_id"].as_str()

@@ -447,6 +447,7 @@ mod tests {
             root_session_id: None,
             role: None,
             account_key: None,
+            idle_nudge_enabled: true,
         }
     }
     fn write(path: &Path, rows: Vec<Value>) {

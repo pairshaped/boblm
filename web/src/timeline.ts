@@ -25,6 +25,7 @@ export type ChatRow = {
   delivery?: string;
   /** For an expired message: whether it was queued or unconfirmed when it expired. */
   expiredFrom?: string;
+  idleNudgeCanceled?: boolean;
   senderSessionId?: string;
   attachments?: ReadonlyArray<AttachmentInfo>;
   tools?: ReadonlyArray<ToolDetail>;
@@ -124,6 +125,9 @@ export function projectEvents(
         ...(e.payload.expired_from
           ? { expiredFrom: e.payload.expired_from }
           : {}),
+        ...(e.payload.expiry_reason === "idle_nudge_disabled"
+          ? { idleNudgeCanceled: true }
+          : {}),
         ...(e.payload.sender_session_id
           ? { senderSessionId: e.payload.sender_session_id }
           : {}),
@@ -140,6 +144,9 @@ export function projectEvents(
           delivery: e.payload.delivery_state,
           ...(e.payload.expired_from
             ? { expiredFrom: e.payload.expired_from }
+            : {}),
+          ...(e.payload.expiry_reason === "idle_nudge_disabled"
+            ? { idleNudgeCanceled: true }
             : {}),
         });
     } else if (e.kind === "agent_session_changed" && e.payload.previous) {
