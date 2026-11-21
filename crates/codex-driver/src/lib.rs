@@ -55,6 +55,7 @@ type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Reply>>>>;
 struct Settings {
     model: String,
     effort: Option<String>,
+    speed: Option<String>,
     cwd: PathBuf,
     mcp_url: Option<String>,
 }
@@ -199,6 +200,7 @@ impl CodexSession {
             settings: Mutex::new(Settings {
                 model: options.model.to_owned(),
                 effort: options.effort.map(str::to_owned),
+                speed: None,
                 cwd: options.cwd.to_owned(),
                 mcp_url: options.mcp.as_ref().map(|m| m.url.to_owned()),
             }),
@@ -361,9 +363,10 @@ impl CodexSession {
     }
 
     /// Choose the model and effort for the next turns; nothing restarts.
-    pub fn configure(&self, model: &str, effort: Option<&str>) {
+    pub fn configure(&self, model: &str, effort: Option<&str>, speed: Option<&str>) {
         let mut settings = self.shared.settings.lock().expect("settings lock");
         settings.model = model.to_owned();
+        settings.speed = speed.map(str::to_owned);
         settings.effort = effort.map(str::to_owned);
     }
 
@@ -485,7 +488,7 @@ impl CodexSession {
                 None => {
                     let params = {
                         let settings = self.shared.settings.lock().expect("settings lock");
-                        let mut params = json!({"threadId": thread, "input": input, "clientUserMessageId": uuid, "model": settings.model});
+                        let mut params = json!({"threadId": thread, "input": input, "clientUserMessageId": uuid, "model": settings.model, "serviceTierForTurn": settings.speed.as_deref().unwrap_or("default")});
                         if let Some(effort) = &settings.effort {
                             params["effort"] = json!(effort);
                         }

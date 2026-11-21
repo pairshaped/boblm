@@ -19,6 +19,8 @@ pub struct ModelSpec {
     pub agent: &'static str,
     /// Reasoning efforts this model accepts, weakest first.
     pub efforts: &'static [&'static str],
+    /// Optional service tiers above normal speed.
+    pub speeds: &'static [&'static str],
 }
 
 /// A model's short label, or its id when the catalog no longer offers it.
@@ -375,60 +377,70 @@ pub const MODELS: &[ModelSpec] = &[
         label: "opus",
         agent: "claude",
         efforts: CLAUDE_EFFORTS,
+        speeds: &[],
     },
     ModelSpec {
         id: MODEL_FABLE,
         label: "fable",
         agent: "claude",
         efforts: CLAUDE_EFFORTS,
+        speeds: &[],
     },
     ModelSpec {
         id: MODEL_SONNET,
         label: "sonnet",
         agent: "claude",
         efforts: CLAUDE_EFFORTS,
+        speeds: &[],
     },
     ModelSpec {
         id: MODEL_HAIKU,
         label: "haiku",
         agent: "claude",
         efforts: CLAUDE_EFFORTS,
+        speeds: &[],
     },
     ModelSpec {
         id: MODEL_GPT_6_2_SOL,
         label: "sol",
         agent: "codex",
         efforts: CODEX_EFFORTS,
+        speeds: &["priority", "ultrafast"],
     },
     ModelSpec {
         id: MODEL_GPT_6_2_ASTRA,
         label: "astra",
         agent: "codex",
         efforts: CODEX_EFFORTS,
+        speeds: &["priority"],
     },
     ModelSpec {
         id: MODEL_GPT_6_1_SOL,
         label: "sol-6.1",
         agent: "codex",
         efforts: CODEX_EFFORTS,
+        speeds: &["priority"],
     },
     ModelSpec {
         id: MODEL_GPT_6_1_TERRA,
         label: "terra",
         agent: "codex",
         efforts: CODEX_EFFORTS,
+        speeds: &["priority"],
     },
     ModelSpec {
         id: MODEL_GPT_6_LUNA,
         label: "luna",
         agent: "codex",
         efforts: CODEX_EFFORTS,
+        speeds: &["priority"],
     },
     ModelSpec {
         id: MODEL_DEEPSEEK_V41_FLASH,
         label: "dsf",
         agent: "pi",
         efforts: PI_EFFORTS,
+        speeds: &[],
     },
 ];
 /// Most notifications drained in one scheduler tick.

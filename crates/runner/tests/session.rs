@@ -91,7 +91,12 @@ impl Driver for Fake {
     async fn next_event(&mut self) -> Option<Event> {
         self.events.recv().await
     }
-    async fn configure(&mut self, model: &str, effort: Option<&str>) -> io::Result<()> {
+    async fn configure(
+        &mut self,
+        model: &str,
+        effort: Option<&str>,
+        _: Option<&str>,
+    ) -> io::Result<()> {
         self.model = model.to_owned();
         self.effort = effort.map(str::to_owned);
         Ok(())
@@ -1069,7 +1074,7 @@ async fn model_and_effort_change_between_turns_and_survive_stop() {
     h.lifecycle(A, LifecycleState::Completed);
     h.result();
     wait_status(&client, |s| !s.turn_active && s.dispatching == 0).await;
-    client.set_model("opus", Some("high")).await.unwrap();
+    client.set_model("opus", Some("high"), None).await.unwrap();
     client.send(B, "two").await.unwrap();
     let second = h.input().await;
     assert_eq!(
@@ -1167,7 +1172,7 @@ async fn active_selection_is_pending_while_steers_keep_the_current_configuration
     h.input().await;
     h.lifecycle(A, LifecycleState::Started);
     wait_status(&client, |s| s.dispatching == 0).await;
-    client.set_model("opus", Some("high")).await.unwrap();
+    client.set_model("opus", Some("high"), None).await.unwrap();
     assert!(client.status().await.unwrap().selection_pending);
     client.send(B, "steer immediately").await.unwrap();
     let steer = h.input().await;
@@ -1260,7 +1265,7 @@ async fn unapplied_selection_survives_disconnect_and_restart() {
     h.input().await;
     h.lifecycle(A, LifecycleState::Started);
     wait_status(&client, |s| s.dispatching == 0).await;
-    client.set_model("opus", Some("high")).await.unwrap();
+    client.set_model("opus", Some("high"), None).await.unwrap();
     assert!(client.status().await.unwrap().selection_pending);
     client.archive(true).await.unwrap();
     let status = client.status().await.unwrap();
@@ -1542,7 +1547,7 @@ impl Driver for IdleDriver {
     async fn next_event(&mut self) -> Option<Event> {
         std::future::pending().await
     }
-    async fn configure(&mut self, _: &str, _: Option<&str>) -> io::Result<()> {
+    async fn configure(&mut self, _: &str, _: Option<&str>, _: Option<&str>) -> io::Result<()> {
         Ok(())
     }
     async fn abort(&mut self) -> io::Result<()> {

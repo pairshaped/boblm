@@ -65,7 +65,7 @@ impl Driver for Fake {
     async fn next_event(&mut self) -> Option<Event> {
         self.rx.recv().await
     }
-    async fn configure(&mut self, _: &str, _: Option<&str>) -> io::Result<()> {
+    async fn configure(&mut self, _: &str, _: Option<&str>, _: Option<&str>) -> io::Result<()> {
         Ok(())
     }
     async fn abort(&mut self) -> io::Result<()> {

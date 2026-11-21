@@ -187,11 +187,11 @@ async fn a_new_chat_announces_its_conversation_and_a_message_is_consumed_under_i
 async fn a_chosen_model_and_effort_apply_from_the_next_turn_without_a_restart() {
     let mut session = start().await;
     next(&mut session).await;
-    session.configure("gpt-6.1-sol", Some("high"));
+    session.configure("gpt-6.1-sol", Some("high"), Some("priority"));
     session.send_message("m-1", "again", None).await.unwrap();
     assert_eq!(
         answer(&until_result(&mut session).await),
-        "echo: again [model=gpt-6.1-sol effort=high]"
+        "echo: again [model=gpt-6.1-sol effort=high speed=priority]"
     );
     session.stop().await.unwrap();
 }
@@ -273,7 +273,7 @@ async fn stopping_a_turn_ends_it_with_an_interrupted_result() {
 async fn codex_refusing_a_message_says_why_and_rejects_it() {
     let mut session = start().await;
     next(&mut session).await;
-    session.configure("bad-model", None);
+    session.configure("bad-model", None, None);
     session.send_message("m-1", "hi", None).await.unwrap();
     let Event::Assistant { message } = next(&mut session).await else {
         panic!("expected the reason first")

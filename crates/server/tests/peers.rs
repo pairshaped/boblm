@@ -536,7 +536,7 @@ impl Driver for Fake {
         }
         self.events.recv().await
     }
-    async fn configure(&mut self, _: &str, _: Option<&str>) -> io::Result<()> {
+    async fn configure(&mut self, _: &str, _: Option<&str>, _: Option<&str>) -> io::Result<()> {
         Ok(())
     }
     async fn abort(&mut self) -> io::Result<()> {
@@ -990,7 +990,7 @@ async fn spawn_requires_model_and_effort_and_inherits_directory_only() {
         .create_session("caller", temp.path().to_str().unwrap(), 1)
         .unwrap();
     store
-        .set_model_effort("caller", "sonnet", Some("low"))
+        .set_model_effort("caller", "sonnet", Some("low"), None)
         .unwrap();
     let (emit, events) = tokio::sync::mpsc::unbounded_channel();
     let (inputs, mut received) = tokio::sync::mpsc::unbounded_channel();

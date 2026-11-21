@@ -22,7 +22,12 @@ pub trait Driver: Send + Sync {
         self.send(uuid, content, priority).await
     }
     async fn next_event(&mut self) -> Option<Event>;
-    async fn configure(&mut self, model: &str, effort: Option<&str>) -> io::Result<()>;
+    async fn configure(
+        &mut self,
+        model: &str,
+        effort: Option<&str>,
+        _speed: Option<&str>,
+    ) -> io::Result<()>;
     /// True when a steer waits for the next tool boundary instead of being consumed promptly.
     fn steers_wait_for_tool_boundary(&self) -> bool {
         false
@@ -132,7 +137,12 @@ impl Driver for ClaudeDriver {
             None => None,
         }
     }
-    async fn configure(&mut self, model: &str, effort: Option<&str>) -> io::Result<()> {
+    async fn configure(
+        &mut self,
+        model: &str,
+        effort: Option<&str>,
+        _speed: Option<&str>,
+    ) -> io::Result<()> {
         let session = self.0.as_ref().ok_or_else(|| {
             io::Error::other("Claude is not running: its process was already stopped.")
         })?;
@@ -198,7 +208,12 @@ impl Driver for CodexDriver {
             None => None,
         }
     }
-    async fn configure(&mut self, model: &str, effort: Option<&str>) -> io::Result<()> {
+    async fn configure(
+        &mut self,
+        model: &str,
+        effort: Option<&str>,
+        speed: Option<&str>,
+    ) -> io::Result<()> {
         if let Some(session) = &mut self.0 {
             session.enable_usage_reporting();
             session.enable_background_reporting();
@@ -208,7 +223,7 @@ impl Driver for CodexDriver {
             .ok_or_else(|| {
                 io::Error::other("Codex is not running: its process was already stopped.")
             })?
-            .configure(model, effort);
+            .configure(model, effort, speed);
         Ok(())
     }
     fn set_usage_poll_gate(&mut self, gate: Arc<dyn Fn() -> bool + Send + Sync>) {
@@ -262,7 +277,12 @@ impl Driver for PiDriver {
             None => None,
         }
     }
-    async fn configure(&mut self, model: &str, effort: Option<&str>) -> io::Result<()> {
+    async fn configure(
+        &mut self,
+        model: &str,
+        effort: Option<&str>,
+        _speed: Option<&str>,
+    ) -> io::Result<()> {
         if let Some(session) = &self.0 {
             session.enable_usage_reporting();
         }

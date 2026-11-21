@@ -106,6 +106,10 @@ def run_turn(text, client_id, params):
             finish_turn("failed", "model overloaded")
             return
         settings = "model=%s effort=%s" % (params.get("model"), params.get("effort"))
+        if "serviceTierForTurn" not in params:
+            settings += " speed=unspecified"
+        elif params["serviceTierForTurn"] != "default":
+            settings += " speed=" + params["serviceTierForTurn"]
         agent_reply("echo: %s [%s]" % (text, settings))
         finish_turn("completed")
     threading.Thread(target=work, daemon=True).start()

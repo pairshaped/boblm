@@ -440,6 +440,8 @@ mod tests {
             name: "Parent".into(),
             applied_model: "fixture".into(),
             applied_effort: None,
+            speed: None,
+            applied_speed: None,
             project_id: Some("p".into()),
             agent: agent.into(),
             account_id: None,

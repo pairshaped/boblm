@@ -210,7 +210,7 @@ fn provider_caps_span_roots_include_owner_chats_and_preserve_retries() {
         // Classification reads the current choice, regardless of the original receipt.
         if agent == "pi" {
             store
-                .set_model_effort("owner", "another-model", None)
+                .set_model_effort("owner", "another-model", None, None)
                 .unwrap();
         } else {
             store

@@ -1060,7 +1060,11 @@ async fn set_model(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<Comma
     let request: SetModel = body(&bytes)?;
     let handle = app.handle(&request.session_id).await?;
     handle
-        .set_model(&request.model, request.effort.as_deref())
+        .set_model(
+            &request.model,
+            request.effort.as_deref(),
+            request.speed.as_deref(),
+        )
         .await?;
     Ok(Json(CommandResponse {
         status: wire_status(handle.status().await?)?,

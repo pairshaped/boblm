@@ -1656,7 +1656,9 @@ mod tests {
         let initial = &store.reader().unwrap().sessions().unwrap()[0];
         assert_eq!(initial.model, "sonnet");
         assert!(initial.effort.is_none());
-        store.set_model_effort("s", "opus", Some("high")).unwrap();
+        store
+            .set_model_effort("s", "opus", Some("high"), None)
+            .unwrap();
         store.set_archived("s", true).unwrap();
         drop(store);
         let store = Store::open(temp.path().join("test.sqlite")).unwrap();
@@ -1665,7 +1667,7 @@ mod tests {
         let session = &reader.sessions().unwrap()[0];
         assert_eq!(session.model, "opus");
         assert_eq!(session.effort.as_deref(), Some("high"));
-        assert!(store.set_model_effort("s", "", Some("high")).is_err());
+        assert!(store.set_model_effort("s", "", Some("high"), None).is_err());
         assert_eq!(reader.sessions().unwrap()[0].model, "opus");
         assert_eq!(
             reader

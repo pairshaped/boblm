@@ -335,17 +335,32 @@ fn set_one_archived(tx: &rusqlite::Transaction<'_>, id: &str, archived: bool) ->
 
 impl Store {
     /// Persist the next-turn choice. Model/effort catalog validation belongs to commands.
-    pub fn set_model_effort(&self, id: &str, model: &str, effort: Option<&str>) -> Result<()> {
+    pub fn set_model_effort(
+        &self,
+        id: &str,
+        model: &str,
+        effort: Option<&str>,
+        speed: Option<&str>,
+    ) -> Result<()> {
         let mut conn = self.writer.lock().map_err(|_| Error::Poisoned)?;
         let tx = conn.transaction()?;
-        if sql::set_model_effort(&tx, sql::SetModelEffortParams { id, model, effort })? != 1 {
+        if sql::set_model_effort(
+            &tx,
+            sql::SetModelEffortParams {
+                id,
+                model,
+                effort,
+                speed,
+            },
+        )? != 1
+        {
             return Err(rusqlite::Error::QueryReturnedNoRows.into());
         }
         crate::events::append(
             &tx,
             id,
             "model_effort_changed",
-            serde_json::json!({"model": model, "effort": effort}),
+            serde_json::json!({"model": model, "effort": effort, "speed": speed}),
             crate::events::now_ms(),
         )?;
         tx.commit()?;
@@ -356,10 +371,25 @@ impl Store {
 impl Store {
     /// Record the model and effort a running Claude process has actually applied.
     /// A session whose stored choice differs from this has a pending selection.
-    pub fn set_applied_choice(&self, id: &str, model: &str, effort: Option<&str>) -> Result<()> {
+    pub fn set_applied_choice(
+        &self,
+        id: &str,
+        model: &str,
+        effort: Option<&str>,
+        speed: Option<&str>,
+    ) -> Result<()> {
         let mut conn = self.writer.lock().map_err(|_| Error::Poisoned)?;
         let tx = conn.transaction()?;
-        if sql::set_applied_choice(&tx, sql::SetAppliedChoiceParams { id, model, effort })? != 1 {
+        if sql::set_applied_choice(
+            &tx,
+            sql::SetAppliedChoiceParams {
+                id,
+                model,
+                effort,
+                speed,
+            },
+        )? != 1
+        {
             return Err(rusqlite::Error::QueryReturnedNoRows.into());
         }
         tx.commit()?;

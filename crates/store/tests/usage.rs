@@ -49,7 +49,7 @@ fn context_stays_per_chat_and_survives_history_eviction() {
             5,
         )
         .unwrap();
-    store.set_model_effort("a", "opus", None).unwrap();
+    store.set_model_effort("a", "opus", None, None).unwrap();
     assert!(reader.usage_samples("a").unwrap().context.is_none());
 }
 

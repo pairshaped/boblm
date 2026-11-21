@@ -86,6 +86,7 @@ pub struct Status {
     pub archived: bool,
     pub model: String,
     pub effort: Option<String>,
+    pub speed: Option<String>,
 }
 /// Outcome of a self-compaction request, including refusals and the observed context size.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,7 +134,11 @@ enum Action {
     Stop,
     Archive(bool),
     Retry(String),
-    SetModel(String, Option<String>),
+    SetModel(
+        String,
+        Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")] Option<String>,
+    ),
     Rename {
         name: String,
         only_if_unnamed: bool,
@@ -183,10 +188,16 @@ impl SessionHandle {
             _ => Err(Error::Closed),
         }
     }
-    pub async fn set_model(&self, model: &str, effort: Option<&str>) -> Result<()> {
+    pub async fn set_model(
+        &self,
+        model: &str,
+        effort: Option<&str>,
+        speed: Option<&str>,
+    ) -> Result<()> {
         self.call(Action::SetModel(
             model.to_owned(),
             effort.map(str::to_owned),
+            speed.map(str::to_owned),
         ))
         .await
         .map(|_| ())
@@ -484,7 +495,7 @@ struct Actor {
     stop_deadline: Option<Instant>,
     stop_replies: Vec<oneshot::Sender<Result<Reply>>>,
     archive_after_stop: bool,
-    applied_choice: Option<(String, Option<String>)>,
+    applied_choice: Option<(String, Option<String>, Option<String>)>,
     auto_task: Option<AutoTask>,
     overflow_resume_used: bool,
     outstanding_tools: HashSet<String>,
@@ -649,8 +660,9 @@ impl Actor {
                 .count()
         };
         // Durable, so a disconnect or restart cannot hide a stored but unapplied choice.
-        let selection_pending =
-            session.applied_model != session.model || session.applied_effort != session.effort;
+        let selection_pending = session.applied_model != session.model
+            || session.applied_effort != session.effort
+            || session.applied_speed != session.speed;
         Ok(Status {
             account_key: session.account_key,
             prompt_suggestion: self.prompt_suggestion.clone(),
@@ -675,6 +687,7 @@ impl Actor {
             archived: session.archived,
             model: session.model,
             effort: session.effort,
+            speed: session.speed,
         })
     }
     async fn publish_status(&mut self) -> Result<()> {
@@ -1120,9 +1133,18 @@ impl Actor {
                 self.db(move |store| store.set_name(&id, &name)).await?;
                 Ok(Reply::Accepted(true))
             }
-            Action::SetModel(model, effort) => {
+            Action::SetModel(model, effort, speed) => {
                 let agent = boblm_protocol::client::check_choice(&model, effort.as_deref())
                     .map_err(Error::Invalid)?;
+                if let Some(tier) = speed.as_deref()
+                    && !boblm_tuning::MODELS
+                        .iter()
+                        .any(|m| m.id == model && m.speeds.contains(&tier))
+                {
+                    return Err(Error::Invalid(format!(
+                        "The {model} model does not support that speed. Choose a speed listed for this model."
+                    )));
+                }
                 let current = self.session().await?;
                 if current.agent != agent.as_str() {
                     let own = boblm_protocol::client::Agent::parse(&current.agent)
@@ -1133,8 +1155,10 @@ impl Actor {
                     )));
                 }
                 let id = self.id.clone();
-                self.db(move |store| store.set_model_effort(&id, &model, effort.as_deref()))
-                    .await?;
+                self.db(move |store| {
+                    store.set_model_effort(&id, &model, effort.as_deref(), speed.as_deref())
+                })
+                .await?;
                 Ok(Reply::Done)
             }
             Action::Shutdown => {
@@ -1541,13 +1565,15 @@ impl Actor {
             }
             if idle {
                 let session = self.session().await?;
-                let (model, effort) = (session.model.clone(), session.effort.clone());
-                if self.applied_choice.as_ref() != Some(&(model.clone(), effort.clone())) {
+                let (model, effort, speed) = (session.model, session.effort, session.speed);
+                if self.applied_choice.as_ref()
+                    != Some(&(model.clone(), effort.clone(), speed.clone()))
+                {
                     if let Err(error) = self
                         .driver
                         .as_mut()
                         .ok_or(Error::Closed)?
-                        .configure(&model, effort.as_deref())
+                        .configure(&model, effort.as_deref(), speed.as_deref())
                         .await
                     {
                         self.record(
@@ -1558,13 +1584,19 @@ impl Actor {
                         self.disconnect().await?;
                         return Ok(());
                     }
+                    let speed_name = speed.clone();
                     let (id, model_name, effort_name) =
                         (self.id.clone(), model.clone(), effort.clone());
                     self.db(move |store| {
-                        store.set_applied_choice(&id, &model_name, effort_name.as_deref())
+                        store.set_applied_choice(
+                            &id,
+                            &model_name,
+                            effort_name.as_deref(),
+                            speed_name.as_deref(),
+                        )
                     })
                     .await?;
-                    self.applied_choice = Some((model, effort));
+                    self.applied_choice = Some((model, effort, speed));
                 }
             }
             let uuid = message.uuid.clone();

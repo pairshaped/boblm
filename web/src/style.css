@@ -761,7 +761,8 @@ pre {
 .toolbar .model-control select {
   width: 100%;
 }
-.toolbar .effort-control {
+.toolbar .effort-control,
+.toolbar .speed-control {
   flex-shrink: 0;
 }
 .send-error {

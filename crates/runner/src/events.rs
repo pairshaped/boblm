@@ -25,6 +25,7 @@ pub fn wire_status(status: Status) -> Result<SessionStatus> {
         archived: status.archived,
         model: status.model,
         effort: status.effort,
+        speed: status.speed,
     })
 }
 fn sequence(value: i64) -> Result<Sequence> {

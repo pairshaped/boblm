@@ -243,7 +243,11 @@
             "max"
           ],
           "label": "sol",
-          "model": "gpt-6.2-sol"
+          "model": "gpt-6.2-sol",
+          "speeds": [
+            "priority",
+            "ultrafast"
+          ]
         },
         {
           "agent": "codex",
@@ -255,7 +259,10 @@
             "max"
           ],
           "label": "astra",
-          "model": "gpt-6.2-astra"
+          "model": "gpt-6.2-astra",
+          "speeds": [
+            "priority"
+          ]
         },
         {
           "agent": "codex",
@@ -267,7 +274,10 @@
             "max"
           ],
           "label": "sol-6.1",
-          "model": "gpt-6.1-sol"
+          "model": "gpt-6.1-sol",
+          "speeds": [
+            "priority"
+          ]
         },
         {
           "agent": "codex",
@@ -279,7 +289,10 @@
             "max"
           ],
           "label": "terra",
-          "model": "gpt-6.1-terra"
+          "model": "gpt-6.1-terra",
+          "speeds": [
+            "priority"
+          ]
         },
         {
           "agent": "codex",
@@ -291,7 +304,10 @@
             "max"
           ],
           "label": "luna",
-          "model": "gpt-6-luna"
+          "model": "gpt-6-luna",
+          "speeds": [
+            "priority"
+          ]
         },
         {
           "agent": "pi",
@@ -346,6 +362,7 @@
             "rejected": 0,
             "running": false,
             "selectionPending": true,
+            "speed": null,
             "stopping": false,
             "turnActive": false,
             "uncertain": 1
@@ -397,6 +414,7 @@
         "rejected": 0,
         "running": false,
         "selectionPending": true,
+        "speed": null,
         "stopping": false,
         "turnActive": false,
         "uncertain": 1
@@ -439,6 +457,7 @@
         "rejected": 0,
         "running": false,
         "selectionPending": true,
+        "speed": null,
         "stopping": false,
         "turnActive": false,
         "uncertain": 1
@@ -485,6 +504,7 @@
         "rejected": 0,
         "running": false,
         "selectionPending": true,
+        "speed": null,
         "stopping": false,
         "turnActive": false,
         "uncertain": 1
@@ -534,6 +554,7 @@
         "rejected": 0,
         "running": false,
         "selectionPending": true,
+        "speed": null,
         "stopping": false,
         "turnActive": false,
         "uncertain": 1
@@ -585,6 +606,7 @@
         "rejected": 0,
         "running": false,
         "selectionPending": true,
+        "speed": null,
         "stopping": false,
         "turnActive": false,
         "uncertain": 1
@@ -671,6 +693,7 @@
         "rejected": 0,
         "running": false,
         "selectionPending": true,
+        "speed": null,
         "stopping": false,
         "turnActive": false,
         "uncertain": 1
@@ -730,6 +753,7 @@
         "rejected": 0,
         "running": false,
         "selectionPending": true,
+        "speed": null,
         "stopping": false,
         "turnActive": false,
         "uncertain": 1
@@ -899,7 +923,8 @@
       "kind": "model_effort_changed",
       "payload": {
         "effort": "high",
-        "model": "opus"
+        "model": "opus",
+        "speed": null
       },
       "seq": 1,
       "sessionId": "s"

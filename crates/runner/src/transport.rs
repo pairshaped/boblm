@@ -163,7 +163,8 @@ impl RunningSession {
                 account_usage: account_usage.map(Box::new),
                 stopped: reader.runner_stopped(&id)?,
                 selection_pending: row.applied_model != row.model
-                    || row.applied_effort != row.effort,
+                    || row.applied_effort != row.effort
+                    || row.applied_speed != row.speed,
                 held_reason: None,
                 queue_held: true,
                 running: false,
@@ -176,6 +177,7 @@ impl RunningSession {
                 archived: row.archived,
                 model: row.model,
                 effort: row.effort,
+                speed: row.speed,
             })
         })
         .await??;

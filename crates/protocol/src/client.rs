@@ -73,6 +73,8 @@ pub struct ModelOption {
     pub label: String,
     pub agent: Agent,
     pub efforts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub speeds: Vec<String>,
 }
 fn agent_of(spec: &boblm_tuning::ModelSpec) -> Agent {
     Agent::parse(spec.agent).unwrap_or(Agent::Claude)
@@ -84,6 +86,7 @@ pub fn model_catalog() -> Vec<ModelOption> {
             model: spec.id.to_owned(),
             label: spec.label.to_owned(),
             agent: agent_of(spec),
+            speeds: spec.speeds.iter().map(|s| (*s).to_owned()).collect(),
             efforts: spec.efforts.iter().map(|e| (*e).to_owned()).collect(),
         })
         .collect()
@@ -347,6 +350,7 @@ pub struct SetModel {
     pub session_id: String,
     pub model: String,
     pub effort: Option<String>,
+    pub speed: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -729,6 +733,7 @@ pub struct SessionStatus {
     pub archived: bool,
     pub model: String,
     pub effort: Option<String>,
+    pub speed: Option<String>,
 }
 /// Counts a root's subagents for its sidebar entry and alert badge.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -831,6 +836,7 @@ pub struct ArchiveChangedEvent {
 pub struct ModelEffortChangedEvent {
     pub model: String,
     pub effort: Option<String>,
+    pub speed: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -872,7 +878,7 @@ events! {
     SessionRenamed(SessionRenamedEvent), SessionCreated(SessionCreatedEvent), MessageAppended(MessageAppendedEvent), DeliveryChanged(DeliveryChangedEvent),
     AgentSessionChanged(AgentSessionChangedEvent), ArchiveChanged(ArchiveChangedEvent), ModelEffortChanged(ModelEffortChangedEvent),
     DeliveryRejected(DeliveryRejectedEvent), AgentEvent(serde_json::Value), DriverError(DriverErrorEvent), ModelError(DriverErrorEvent),
-    StateSummary(SessionStatus), SessionStopping(Empty), SessionStopped(Empty), DeliveryTimeout(Empty), StopTimeout(Empty),
+    StateSummary(Box<SessionStatus>), SessionStopping(Empty), SessionStopped(Empty), DeliveryTimeout(Empty), StopTimeout(Empty),
     QuestionsChanged(serde_json::Value), SecretRequested(SecretRequestedEvent), SecretResolved(SecretResolvedEvent)
 }
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -964,7 +970,7 @@ pub enum SessionListEvent {
         session_id: String,
         seq: Sequence,
         created_at: i64,
-        payload: SessionStatus,
+        payload: Box<SessionStatus>,
     },
     /// A chat's questions changed, so the shared questions dialog must refresh.
     QuestionsChanged {

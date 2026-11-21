@@ -368,7 +368,12 @@ export type Msg =
   | { type: "command"; name: string }
   | { type: "commandOn"; name: string; sessionId: string }
   | { type: "setIdleNudge"; sessionId: string; enabled: boolean }
-  | { type: "choice"; model?: string; effort?: string | null }
+  | {
+      type: "choice";
+      model?: string;
+      effort?: string | null;
+      speed?: string | null;
+    }
   | { type: "event"; event: StoredEvent }
   | { type: "unknownEvent"; sessionId: string; seq: number }
   | { type: "unknownListEvent"; seq: number }
@@ -2466,6 +2471,15 @@ function step(model: Model, msg: Msg): readonly [Model, ReadonlyArray<Effect>] {
             {
               sessionId: session.sessionId,
               model: msg.model ?? session.status.model,
+              speed:
+                msg.speed !== undefined
+                  ? msg.speed
+                  : msg.model &&
+                      !model.models
+                        .find((m) => m.model === msg.model)
+                        ?.speeds?.includes(session.status.speed ?? "")
+                    ? null
+                    : (session.status.speed ?? null),
               effort:
                 msg.effort === undefined
                   ? (session.status.effort ?? null)
@@ -4212,6 +4226,10 @@ function connectionDialog(model: Model): VNode<Model> {
 export function view(model: Model): VNode<Model> {
   if (!model.token || model.connectionPending) return connectionDialog(model);
   const session = model.sessions.find((s) => s.sessionId === model.active);
+  const selectedModel = model.models.find(
+    (m) => m.model === session?.status.model,
+  );
+  const speeds = selectedModel?.speeds ?? [];
   const idleNudgeEnabled = session?.idleNudgeEnabled ?? true;
   const sending = !!(model.active && model.pending[model.active]);
   // The suggestion is an overlay, not a placeholder: Safari reads placeholder text
@@ -5282,12 +5300,37 @@ export function view(model: Model): VNode<Model> {
                       })),
                     },
                     h("option", { value: "" }, "Default"),
-                    (
-                      model.models.find((m) => m.model === session.status.model)
-                        ?.efforts ?? []
-                    ).map((effort) => h("option", { value: effort }, effort)),
+                    (selectedModel?.efforts ?? []).map((effort) =>
+                      h("option", { value: effort }, effort),
+                    ),
                   ),
                 ),
+                speeds.length
+                  ? h(
+                      "div",
+                      { class: "speed-control" },
+                      h(
+                        "select",
+                        {
+                          "aria-label": "Speed",
+                          controlledValue: session.status.speed ?? "",
+                          onChange: binding((event) => ({
+                            type: "choice",
+                            speed:
+                              (event.target as HTMLSelectElement).value || null,
+                          })),
+                        },
+                        h("option", { value: "" }, "Normal (1x)"),
+                        speeds.map((speed) =>
+                          h(
+                            "option",
+                            { value: speed },
+                            speed === "priority" ? "Fast" : "Ultrafast",
+                          ),
+                        ),
+                      ),
+                    )
+                  : null,
                 session.status.selectionPending
                   ? h(
                       "small",

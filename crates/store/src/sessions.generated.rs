@@ -37,7 +37,7 @@ pub fn create(conn: impl MutationConnection, params: CreateParams<'_>) -> Result
     )
 }
 
-const LIST_SQL: &str = r"SELECT id, working_directory, agent_session_id, created_at, archived, model, effort, name, applied_model, applied_effort, project_id, agent, account_id, parent_session_id, root_session_id, role, account_key, idle_nudge_enabled FROM sessions ORDER BY position, id";
+const LIST_SQL: &str = r"SELECT id, working_directory, agent_session_id, created_at, archived, model, effort, name, applied_model, applied_effort, project_id, agent, account_id, parent_session_id, root_session_id, role, account_key, idle_nudge_enabled, speed, applied_speed FROM sessions ORDER BY position, id";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListRow {
@@ -59,6 +59,8 @@ pub struct ListRow {
     pub role: Option<String>,
     pub account_key: Option<String>,
     pub idle_nudge_enabled: bool,
+    pub speed: Option<String>,
+    pub applied_speed: Option<String>,
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<ListRow>> {
@@ -83,6 +85,8 @@ pub fn list(conn: &Connection) -> Result<Vec<ListRow>> {
             role: row.get(15)?,
             account_key: row.get(16)?,
             idle_nudge_enabled: row.get(17)?,
+            speed: row.get(18)?,
+            applied_speed: row.get(19)?,
         })
     })?;
     rows.collect()
@@ -124,10 +128,12 @@ pub fn set_archived(conn: impl MutationConnection, params: SetArchivedParams<'_>
 pub struct SetModelEffortParams<'a> {
     pub model: &'a str,
     pub effort: Option<&'a str>,
+    pub speed: Option<&'a str>,
     pub id: &'a str,
 }
 
-const SET_MODEL_EFFORT_SQL: &str = r"UPDATE sessions SET model = ?1, effort = ?2 WHERE id = ?3";
+const SET_MODEL_EFFORT_SQL: &str =
+    r"UPDATE sessions SET model = ?1, effort = ?2, speed = ?3 WHERE id = ?4";
 
 pub fn set_model_effort(
     conn: impl MutationConnection,
@@ -136,7 +142,7 @@ pub fn set_model_effort(
     let conn = conn.as_connection();
     conn.execute(
         SET_MODEL_EFFORT_SQL,
-        params![params.model, params.effort, params.id],
+        params![params.model, params.effort, params.speed, params.id],
     )
 }
 
@@ -157,11 +163,11 @@ pub fn set_name(conn: impl MutationConnection, params: SetNameParams<'_>) -> Res
 pub struct SetAppliedChoiceParams<'a> {
     pub model: &'a str,
     pub effort: Option<&'a str>,
+    pub speed: Option<&'a str>,
     pub id: &'a str,
 }
 
-const SET_APPLIED_CHOICE_SQL: &str =
-    r"UPDATE sessions SET applied_model = ?1, applied_effort = ?2 WHERE id = ?3";
+const SET_APPLIED_CHOICE_SQL: &str = r"UPDATE sessions SET applied_model = ?1, applied_effort = ?2, applied_speed = ?3 WHERE id = ?4";
 
 pub fn set_applied_choice(
     conn: impl MutationConnection,
@@ -170,7 +176,7 @@ pub fn set_applied_choice(
     let conn = conn.as_connection();
     conn.execute(
         SET_APPLIED_CHOICE_SQL,
-        params![params.model, params.effort, params.id],
+        params![params.model, params.effort, params.speed, params.id],
     )
 }
 
