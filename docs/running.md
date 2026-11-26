@@ -49,6 +49,15 @@ An interrupted turn, unconfirmed input, a crash, or an explicit owner Stop keeps
 the queue held. A runner running older code must be replaced once before it can
 record a quiet shutdown.
 
+### A project's MCP server is missing
+
+Claude chats load MCP servers only from the `.mcp.json` file in the chat's
+working directory, next to BobLM's own `boblm` server. They don't load user-scope
+servers from `claude mcp add` or `.mcp.json` files in parent directories. A
+project entry named `boblm` is ignored. If the file is unreadable or isn't valid
+JSON, the chat still starts with only BobLM's tools, and the runner's journal says
+why. After you add or change a server, restart that chat's runner.
+
 ### A spawn tool is missing the speed argument
 
 Check `tools/list` on the affected chat's authenticated MCP endpoint. Under

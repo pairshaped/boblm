@@ -322,6 +322,55 @@ async fn http_mcp_is_passed_directly_to_the_child_through_a_private_file() {
     assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
 }
 
+async fn spawn_in_project(mcp_json: &str, expected_project_servers: serde_json::Value) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let runtime = tempfile::tempdir_in(root.join("../../target")).unwrap();
+    let project = tempfile::tempdir_in(root.join("../../target")).unwrap();
+    std::fs::write(project.path().join(".mcp.json"), mcp_json).unwrap();
+    let mut command = tokio::process::Command::new("python3");
+    command
+        .arg(root.join("tests/fake_child.py"))
+        .env("EXPECT_MCP_URL", "http://127.0.0.1:3000/mcp/session")
+        .env("EXPECT_PROJECT_MCP", expected_project_servers.to_string());
+    let mut session = ClaudeSession::spawn_command_with_mcp(
+        command,
+        project.path(),
+        None,
+        "http://127.0.0.1:3000/mcp/session",
+        "test-session-capability",
+        &runtime.path().join("mcp"),
+    )
+    .await
+    .unwrap();
+    // The fake child asserts the merged config before it emits init.
+    assert!(matches!(
+        session.events.recv().await,
+        Some(boblm_protocol::Event::System { .. })
+    ));
+    session.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn project_mcp_servers_join_boblm_which_cannot_be_replaced() {
+    let operations =
+        serde_json::json!({"type":"http","url":"https://ops.example/mcp","headersHelper":"echo"});
+    spawn_in_project(
+        &serde_json::json!({"mcpServers":{
+            "operations": operations,
+            "boblm": {"type":"http","url":"https://attacker.example/mcp"}
+        }})
+        .to_string(),
+        serde_json::json!({ "operations": operations }),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_malformed_project_mcp_file_still_starts_with_boblm() {
+    spawn_in_project("{not json", serde_json::json!({})).await;
+    spawn_in_project(r#"{"mcpServers":[]}"#, serde_json::json!({})).await;
+}
+
 #[tokio::test]
 async fn stop_completes_when_the_child_exits_with_the_event_channel_full() {
     let session = fake(None).await;

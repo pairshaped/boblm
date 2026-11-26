@@ -112,6 +112,58 @@ impl Drop for IncompleteWrite<'_> {
     }
 }
 
+/// The project's MCP servers from `cwd/.mcp.json`. A missing file means none; an
+/// unreadable or malformed one is reported and skipped so the chat still starts
+/// with BobLM's tools and can be used to repair it.
+fn project_mcp_servers(cwd: &Path) -> serde_json::Map<String, serde_json::Value> {
+    let path = cwd.join(".mcp.json");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Default::default(),
+        Err(error) => {
+            eprintln!(
+                "Skipping project MCP servers: {} could not be read: {error}",
+                path.display()
+            );
+            return Default::default();
+        }
+    };
+    let mut servers = match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(serde_json::Value::Object(mut config)) => match config.remove("mcpServers") {
+            Some(serde_json::Value::Object(servers)) => servers,
+            None => return Default::default(),
+            Some(_) => {
+                eprintln!(
+                    "Skipping project MCP servers: mcpServers in {} must be an object.",
+                    path.display()
+                );
+                return Default::default();
+            }
+        },
+        Ok(_) => {
+            eprintln!(
+                "Skipping project MCP servers: {} must contain a JSON object.",
+                path.display()
+            );
+            return Default::default();
+        }
+        Err(error) => {
+            eprintln!(
+                "Skipping project MCP servers: {} is not valid JSON: {error}",
+                path.display()
+            );
+            return Default::default();
+        }
+    };
+    if servers.remove("boblm").is_some() {
+        eprintln!(
+            "Ignoring the boblm server in {}; BobLM supplies its own.",
+            path.display()
+        );
+    }
+    servers
+}
+
 /// A mode 0600 file in a mode 0700 directory, removed on drop.
 struct PrivateFile(std::path::PathBuf);
 impl PrivateFile {
@@ -174,6 +226,8 @@ impl ClaudeSession {
     /// Connect directly to the hub's HTTP MCP endpoint; no stdio bridge. The
     /// capability goes in a private file under `runtime_dir`, never on the command
     /// line where `ps` and `/proc` would show it. The file is removed with the session.
+    /// Strict mode keeps user-scope servers out, so the servers in the working
+    /// directory's `.mcp.json` are copied in beside `boblm`, which always wins.
     pub async fn spawn_command_with_mcp(
         mut command: Command,
         cwd: &Path,
@@ -182,7 +236,12 @@ impl ClaudeSession {
         bearer_token: &str,
         runtime_dir: &Path,
     ) -> io::Result<Self> {
-        let config = serde_json::json!({"mcpServers":{"boblm":{"type":"http","url":url,"headers":{"Authorization":format!("Bearer {bearer_token}")}}}});
+        let mut servers = project_mcp_servers(cwd);
+        servers.insert(
+            "boblm".into(),
+            serde_json::json!({"type":"http","url":url,"headers":{"Authorization":format!("Bearer {bearer_token}")}}),
+        );
+        let config = serde_json::json!({ "mcpServers": servers });
         let file = PrivateFile::create(runtime_dir, config.to_string().as_bytes())?;
         command.args(["--strict-mcp-config", "--mcp-config"]);
         command.arg(&file.0);

@@ -31,7 +31,9 @@ if "EXPECT_MCP_URL" in os.environ:
     assert os.stat(os.path.dirname(config_path)).st_mode & 0o777 == 0o700
     with open(config_path) as config_file:
         mcp = json.load(config_file)
-    assert mcp == {"mcpServers": {"boblm": {"type": "http", "url": os.environ["EXPECT_MCP_URL"], "headers": {"Authorization": "Bearer test-session-capability"}}}}
+    expected = json.loads(os.environ.get("EXPECT_PROJECT_MCP", "{}"))
+    expected["boblm"] = {"type": "http", "url": os.environ["EXPECT_MCP_URL"], "headers": {"Authorization": "Bearer test-session-capability"}}
+    assert mcp == {"mcpServers": expected}, mcp
 emit({"type": "system", "subtype": "init", "session_id": "fake-session", "args": sys.argv[1:]})
 active = False
 queued_steer = None
