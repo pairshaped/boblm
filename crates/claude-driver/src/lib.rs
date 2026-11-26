@@ -835,13 +835,32 @@ impl Drop for ClaudeSession {
 /// Tracks provider output across attempts, never across individual command acknowledgments.
 #[derive(Default)]
 struct Attempt {
+    /// A completed assistant message.
     assistant_output: bool,
+    /// Streamed tokens, which Claude discards when a steer supersedes the response.
+    streamed: bool,
+    /// Commands Claude has queued but not yet started; they outlive attempts.
+    waiting: std::collections::HashSet<String>,
 }
 
 impl Attempt {
     fn observe(&mut self, value: &serde_json::Value) -> Option<Event> {
+        if value["type"] == "command_lifecycle"
+            && let Some(uuid) = value["command_uuid"].as_str()
+        {
+            if value["state"] == "queued" {
+                self.waiting.insert(uuid.to_owned());
+            } else {
+                self.waiting.remove(uuid);
+            }
+            return None;
+        }
         if value["type"] == "result" {
+            // A steer that arrives mid-response makes Claude drop the partial
+            // response and start again with both messages.
+            let superseded = !self.streamed || !self.waiting.is_empty();
             let restart = !self.assistant_output
+                && superseded
                 && value["is_error"] == true
                 && value["subtype"] == "error_during_execution"
                 && value["errors"].as_array().is_some_and(|errors| {
@@ -851,12 +870,16 @@ impl Attempt {
                         })
                 });
             self.assistant_output = false;
+            self.streamed = false;
             return restart.then(|| Event::ClaudeTurnRestart {
                 result: value.clone(),
             });
         }
-        if value["type"] == "assistant" || value["type"] == "stream_event" {
+        if value["type"] == "assistant" {
             self.assistant_output = true;
+        }
+        if value["type"] == "stream_event" {
+            self.streamed = true;
         }
         None
     }
@@ -972,5 +995,38 @@ mod restart_tests {
                 "a result resets the attempt"
             );
         }
+    }
+
+    fn lifecycle(uuid: &str, state: &str) -> serde_json::Value {
+        serde_json::json!({"type":"command_lifecycle", "command_uuid":uuid, "state":state})
+    }
+
+    #[test]
+    fn a_waiting_steer_makes_a_streamed_restart_benign_until_a_message_completes() {
+        let raw =
+            result("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null");
+        let stream = serde_json::json!({"type":"stream_event"});
+        // The observed sequence: first message starts, thinking streams, the steer queues.
+        let mut attempt = Attempt::default();
+        for value in [
+            lifecycle("first", "queued"),
+            lifecycle("first", "started"),
+            stream.clone(),
+            lifecycle("steer", "queued"),
+        ] {
+            assert!(attempt.observe(&value).is_none());
+        }
+        assert!(attempt.observe(&raw).is_some());
+
+        // Once the steer starts, a streamed failure is a real error again.
+        attempt.observe(&lifecycle("steer", "started"));
+        attempt.observe(&stream);
+        assert!(attempt.observe(&raw).is_none());
+
+        // A completed assistant message is never discarded silently.
+        let mut attempt = Attempt::default();
+        attempt.observe(&lifecycle("steer", "queued"));
+        attempt.observe(&serde_json::json!({"type":"assistant"}));
+        assert!(attempt.observe(&raw).is_none());
     }
 }

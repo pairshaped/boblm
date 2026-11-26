@@ -135,7 +135,9 @@ suppress the nudge; subagent result events never create their own opportunities.
 
 Claude's `error_during_execution` result is a benign restart only when its sole
 error starts with `[ede_diagnostic] result_type=user` and the attempt produced no
-assistant or streaming output. BobLM stores the untouched result inside a
+completed assistant message. Streamed tokens disqualify it unless Claude has
+queued a command that hasn't started: a steer that arrives mid-response makes
+Claude drop the partial response and start again with both messages. BobLM stores the untouched result inside a
 `claude_turn_restart` event and shows a muted note. This event leaves the turn
 running and creates neither a subagent report nor an idle-nudge completion. All
 other execution errors retain their normal handling.
