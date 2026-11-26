@@ -83,18 +83,20 @@ with only those settings overridden. The peer tools are given to it as an HTTP M
 capability travels in an environment variable, never an argument (ADR 0015).
 
 Codex chats may select a `codex-plan` or `codex-api` account key. `CODEX_ACCOUNT_HOMES` maps
-each key to a CODEX_HOME; the AgentFactory sets that home on the child. The API home is
-BobLM-owned: its `config.toml` defines a provider with `env_key = "OPENAI_API_KEY"` and the
-Responses wire API. The key is extracted from SOPS for each spawn and placed only in the child's
-environment. It is never written to auth.json, a file, or an argument. The API account uses the
-stable BobLM-assigned identity `openai-api`, and missing rate-limit or credit data is tolerated.
-A missing key refuses that spawn with a plain sentence naming the SOPS path and the next step.
+each key to a CODEX_HOME; the AgentFactory sets that home on the child. BobLM creates the API
+home as a private directory, but its `config.toml` belongs to the owner, like
+`~/.codex/config.toml`, so MCP servers and project trust added there persist. BobLM never writes
+it. The factory selects the API provider with `-c` overrides that set only `model_provider` and
+`model_providers.boblm-openai-api`: `env_key = "OPENAI_API_KEY"` and the Responses wire API. The
+key is extracted from SOPS for each spawn and placed only in the child's environment. It is
+never written to auth.json, a file, or an argument. The API account uses the stable
+BobLM-assigned identity `openai-api`, and missing rate-limit or credit data is tolerated. A
+missing key refuses that spawn with a plain sentence naming the SOPS path and the next step.
 
-The API home is prepared under an exclusive file lock, and its config is replaced atomically,
-so two children starting together cannot read a half-written file. Codex startup on that home
-holds the same lock through the initialize handshake. The first Luna and Sol children therefore
-serialize their one-time state initialization instead of racing on a brand-new home. The lock is
-advisory and local to the BobLM-owned home; the owner's normal Codex home is not locked.
+Codex startup on the API home holds an exclusive file lock through the initialize handshake. The
+first Luna and Sol children therefore serialize their one-time state initialization instead of
+racing on a brand-new home. The lock is advisory and local to the API home; the owner's normal
+Codex home is not locked.
 
 ## Storage
 

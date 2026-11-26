@@ -73,35 +73,32 @@ pub fn lock_home(directory: &Path) -> io::Result<HomeLock> {
     Ok(HomeLock { _lock: lock })
 }
 
-/// Prepare the boblm-owned OpenAI API home. The key itself is never written here;
-/// Codex reads the OPENAI_API_KEY environment variable named by env_key.
+/// Prepare the OpenAI API home: a private directory whose `config.toml` belongs to
+/// the owner, like `~/.codex/config.toml`. BobLM never writes it; the provider comes
+/// from [`api_provider_overrides`].
 pub fn prepare_api_home(directory: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let _lock = lock_home(directory)?;
-    let config = format!(
-        "model_provider = \"{}\"\n[model_providers.{}]\nname = \"OpenAI API\"\nbase_url = \"{}\"\nenv_key = \"OPENAI_API_KEY\"\nwire_api = \"responses\"\n",
-        boblm_tuning::CODEX_API_PROVIDER_ID,
-        boblm_tuning::CODEX_API_PROVIDER_ID,
-        boblm_tuning::CODEX_API_BASE_URL,
-    );
-    let path = directory.join("config.toml");
-    if std::fs::read_to_string(&path).ok().as_deref() == Some(config.as_str()) {
-        return Ok(());
-    }
-    let temporary = directory.join(format!(".config.toml.{}.tmp", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&temporary)?;
-    use std::io::Write;
-    file.write_all(config.as_bytes())?;
-    file.sync_all()?;
-    std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))?;
-    std::fs::rename(&temporary, &path)?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    Ok(())
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(directory)
+}
+
+/// `-c` overrides that select the OpenAI API provider. The key itself is never
+/// written; Codex reads the OPENAI_API_KEY environment variable named by env_key.
+/// Overrides set only these keys, so servers and trust in `config.toml` survive.
+pub fn api_provider_overrides() -> Vec<String> {
+    let id = boblm_tuning::CODEX_API_PROVIDER_ID;
+    vec![
+        format!("model_provider=\"{id}\""),
+        format!("model_providers.{id}.name=\"OpenAI API\""),
+        format!(
+            "model_providers.{id}.base_url=\"{}\"",
+            boblm_tuning::CODEX_API_BASE_URL
+        ),
+        format!("model_providers.{id}.env_key=\"OPENAI_API_KEY\""),
+        format!("model_providers.{id}.wire_api=\"responses\""),
+    ]
 }
 
 fn expand_home(path: &str) -> PathBuf {
@@ -161,21 +158,28 @@ mod tests {
     }
 
     #[test]
-    fn the_api_home_names_the_env_key_provider_without_writing_the_key() {
+    fn the_api_home_keeps_the_owners_config_and_selects_the_provider_by_override() {
         let directory = tempfile::tempdir().unwrap();
-        prepare_api_home(directory.path()).unwrap();
-        let config = std::fs::read_to_string(directory.path().join("config.toml")).unwrap();
-        assert!(config.contains("env_key = \"OPENAI_API_KEY\""));
-        assert!(config.contains(boblm_tuning::CODEX_API_PROVIDER_ID));
-        assert!(!config.contains("sk-"));
-        assert!(!directory.path().join("auth.json").exists());
+        let home = directory.path().join("codex-api");
+        prepare_api_home(&home).unwrap();
         assert_eq!(
-            std::fs::metadata(directory.path().join("config.toml"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
+            std::fs::metadata(&home).unwrap().permissions().mode() & 0o777,
+            0o700
         );
+        let owned = "[mcp_servers.refero]\nurl = \"https://refero.example/mcp\"\n";
+        std::fs::write(home.join("config.toml"), owned).unwrap();
+        prepare_api_home(&home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.join("config.toml")).unwrap(),
+            owned
+        );
+        let overrides = api_provider_overrides().join("\n");
+        assert!(overrides.contains(&format!(
+            "model_provider=\"{}\"",
+            boblm_tuning::CODEX_API_PROVIDER_ID
+        )));
+        assert!(overrides.contains("env_key=\"OPENAI_API_KEY\""));
+        assert!(!overrides.contains("sk-"));
+        assert!(!home.join("auth.json").exists());
     }
 }

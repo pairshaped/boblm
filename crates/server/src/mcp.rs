@@ -1577,6 +1577,9 @@ impl boblm_runner::DriverFactory for AgentFactory {
                 })?;
                 if key == boblm_tuning::CODEX_ACCOUNT_KEY_API {
                     boblm_codex_driver::account::prepare_api_home(&home)?;
+                    for value in boblm_codex_driver::account::api_provider_overrides() {
+                        command.arg("-c").arg(value);
+                    }
                     let api_key = crate::web::openai_api_key()
                         .await
                         .map_err(std::io::Error::other)?;
