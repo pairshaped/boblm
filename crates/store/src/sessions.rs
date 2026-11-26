@@ -12,6 +12,7 @@ pub struct NewSession<'a> {
     pub agent: &'a str,
     pub model: &'a str,
     pub effort: Option<&'a str>,
+    pub speed: Option<&'a str>,
     pub created_at: i64,
 }
 
@@ -68,6 +69,7 @@ pub(crate) fn insert_with_parent(
             agent: new.agent,
             model: new.model,
             effort: new.effort,
+            speed: new.speed,
             created_at: new.created_at,
         },
     )?;
@@ -104,7 +106,7 @@ pub(crate) fn insert_with_parent(
             tx,
             new.id,
             "model_effort_changed",
-            serde_json::json!({"model": new.model, "effort": new.effort}),
+            serde_json::json!({"model": new.model, "effort": new.effort, "speed": new.speed}),
             new.created_at,
         )?;
     }
@@ -179,6 +181,7 @@ impl Store {
             agent: "claude",
             model: "sonnet",
             effort: None,
+            speed: None,
             created_at,
         };
         insert(&tx, &project, &new, false)?;

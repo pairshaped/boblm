@@ -146,7 +146,7 @@ smoothly by the hour rather than stepping by whole days.
 
 ## Role spawn tools
 
-`spawn_subagent(role, difficulty, title, message, requestId, workingDirectory)`
+`spawn_subagent(role, difficulty, title, message, requestId, workingDirectory, speed)`
 creates a hidden subagent under the calling root. Its first message carries the
 subagent reply trailer, so the child knows its final reply reaches the parent
 automatically and `message_parent` is for mid-task questions only. `spawn_peer` accepts either
@@ -154,7 +154,9 @@ explicit `model` and `effort` or `role` and `difficulty`; the role form creates 
 visible root chat. A reviewer is always a hidden subagent: `spawn_peer` refuses role
 `reviewer` with a sentence pointing to `spawn_subagent`. Both require a title of 1 to 200 characters, stored on the
 child in the spawn transaction and included in the receipt identity. Plain
-`spawn_peer` keeps its previous independent-root behavior.
+`spawn_peer` creates an independent root. Both tools accept the optional
+`speed` argument defined in ADR 0015. Role routing chooses the model first.
+If that model can't run at the requested speed, the spawn fails.
 
 The resolved model, effort, account, step and reason are written to the spawn
 receipt. An identical retry returns that stored choice and never re-resolves, even

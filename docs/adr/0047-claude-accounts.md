@@ -52,8 +52,8 @@ that has no active exhaustion mark, in configuration order. The reviewer
 spawn is refused when no enabled API account is available. Unknown credit balances are allowed.
 Quota or billing failures mark the individual API account until the configured
 monthly credit grant day, the 27th UTC (`ANTHROPIC_API_CREDIT_RESET_DAY`). This is
-account A's credit grant day, independent of billing. B shares it until the owner
-links B and confirms its grant day. An older global Haiku exhaustion mark applies to A only.
+account A's credit grant day. Its monthly subscription spend cycle starts on the
+26th. B shares A's credit grant day until the owner links B and confirms its grant day. An older global Haiku exhaustion mark applies to A only.
 
 ## Handoff
 

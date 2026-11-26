@@ -10,6 +10,7 @@ pub struct PeerSpawn {
     pub agent: String,
     pub model: String,
     pub effort: String,
+    pub speed: Option<String>,
     /// The chat title supplied by the caller and stored in the spawn transaction.
     pub title: String,
     pub content: String,
@@ -138,6 +139,7 @@ impl crate::Store {
                 agent: &request.agent,
                 model: &request.model,
                 effort: Some(&request.effort),
+                speed: request.speed.as_deref(),
                 created_at: request.created_at,
             },
             true,

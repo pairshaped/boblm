@@ -28,7 +28,9 @@ directly to the network.
 
 ## Restart one chat's runner
 
-Use this after installing new runner code or changing agent launch settings:
+Restart one runner after installing code that its chat needs, or to let the
+next agent process load fresh tool definitions. Restarting the web service with
+`bin/restart` leaves persistent runners and their current turns running.
 
 ```sh
 boblm restart-runner --session CHAT_ID
@@ -46,6 +48,17 @@ when it reconnects. A quiet shutdown lets later messages dispatch without Resume
 An interrupted turn, unconfirmed input, a crash, or an explicit owner Stop keeps
 the queue held. A runner running older code must be replaced once before it can
 record a quiet shutdown.
+
+### A spawn tool is missing the speed argument
+
+Check `tools/list` on the affected chat's authenticated MCP endpoint. Under
+`spawn_peer` and `spawn_subagent`, look for `inputSchema.properties.speed`.
+If it is present, the server advertises the argument. A chat can still show an
+older local tool definition and successfully send `"speed": "fast"`. If the
+intended spawn succeeds, you can keep working. If the client blocks the field
+before sending the call, refresh its tool definitions or restart that chat's
+runner using the command above. If the endpoint itself omits the field, check
+which BobLM release the web service is running.
 
 ## Add a second Claude account
 

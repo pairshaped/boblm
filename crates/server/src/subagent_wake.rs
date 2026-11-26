@@ -396,6 +396,7 @@ mod tests {
                     agent: "codex",
                     model: "gpt-6-luna",
                     effort: Some("low"),
+                    speed: None,
                     created_at: 0,
                 })
                 .unwrap();

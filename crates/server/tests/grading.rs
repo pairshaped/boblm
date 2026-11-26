@@ -83,6 +83,7 @@ async fn fixture() -> Fixture {
                 agent: if model == "sonnet" { "claude" } else { "codex" }.into(),
                 model: model.into(),
                 effort: effort.into(),
+                speed: None,
                 title: format!("{role} chat"),
                 content: "work".into(),
                 created_at: 3,

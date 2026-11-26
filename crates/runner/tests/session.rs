@@ -174,6 +174,7 @@ impl Harness {
                     agent,
                     model: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
                     effort: Some("high"),
+                    speed: None,
                     created_at: 1,
                 })
                 .unwrap();
@@ -238,6 +239,7 @@ impl Harness {
                 agent: agent.into(),
                 model: model.into(),
                 effort: "high".into(),
+                speed: None,
                 title: "Role chat".into(),
                 content: "work".into(),
                 created_at: now_ms(),
@@ -1711,6 +1713,7 @@ async fn a_codex_chat_that_cannot_start_names_codex_not_claude() {
             agent: "codex",
             model: "gpt-6-luna",
             effort: None,
+            speed: None,
             created_at: 2,
         })
         .unwrap();

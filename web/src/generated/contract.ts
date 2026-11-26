@@ -1893,6 +1893,7 @@ export const contractSchema = {
           "type": "boolean"
         },
         "speed": {
+          "description": "Missing on runners that predate speed selection. Null means Normal.",
           "type": [
             "string",
             "null"

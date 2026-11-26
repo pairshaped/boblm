@@ -86,6 +86,14 @@ transaction. The title is part of the receipt arguments, so an identical retry
 matches while a different title with the same requestId conflicts. An omitted or
 null projectId puts the child in the caller's project; `list_projects` shows the
 others.
+
+Both spawn tools accept an optional top-level `speed`. The advertised values are
+`normal`, `fast` and `ultrafast`. Omission, JSON null and `normal` all select
+standard speed and have the same retry identity. A different effective speed
+with the same `requestId` conflicts. The child gets its own speed choice in the
+creation transaction, so it applies to the first turn. The server rejects a
+tier the explicit or role-selected model doesn't support before creating the child.
+
 The required first prompt is accepted for immediate dispatch, without waiting
 for Claude to consume it. A plain peer is an independent root. Hidden subagents record parent and root
 links and report results back through the durable outbox (ADR 0036).

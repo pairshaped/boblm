@@ -5313,6 +5313,11 @@ export function view(model: Model): VNode<Model> {
                         "select",
                         {
                           "aria-label": "Speed",
+                          disabled: session.status.speed === undefined,
+                          title:
+                            session.status.speed === undefined
+                              ? "Speed is available after this chat’s runner updates."
+                              : "Speed",
                           controlledValue: session.status.speed ?? "",
                           onChange: binding((event) => ({
                             type: "choice",
@@ -5320,7 +5325,7 @@ export function view(model: Model): VNode<Model> {
                               (event.target as HTMLSelectElement).value || null,
                           })),
                         },
-                        h("option", { value: "" }, "Normal (1x)"),
+                        h("option", { value: "" }, "Normal"),
                         speeds.map((speed) =>
                           h(
                             "option",

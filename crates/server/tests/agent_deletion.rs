@@ -51,6 +51,7 @@ fn child(store: &Store) {
             agent: "claude".into(),
             model: "sonnet".into(),
             effort: "high".into(),
+            speed: None,
             title: "Deletion fixture".into(),
             content: "work".into(),
             created_at: 2,

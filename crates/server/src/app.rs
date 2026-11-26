@@ -859,6 +859,7 @@ async fn create_session(State(app): State<Arc<App>>, bytes: Bytes) -> ApiResult<
             agent: agent.as_str(),
             model: &request.model,
             effort: request.effort.as_deref(),
+            speed: None,
             created_at: crate::schedule::now_ms(),
         }, account_key)?;
         store

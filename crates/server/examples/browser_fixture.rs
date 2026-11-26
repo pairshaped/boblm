@@ -301,6 +301,7 @@ fn seed_usage(store: &Store) -> Result<(), Box<dyn std::error::Error>> {
             agent,
             model,
             effort: None,
+            speed: None,
             created_at: now,
         })?;
     }

@@ -79,6 +79,12 @@ compatible with live old runners. Ordinary web and MCP-handler changes can deplo
 without replacing the runners; provider tool-schema caching can still require a
 later tool refresh or a per-chat restart to expose new tool definitions.
 
+Speed support is visible in the runner's status. An absent `speed` field means
+the runner hasn't reported support. An explicit null means it supports speed
+and has selected Normal. The web service preserves that distinction for the
+browser. Until the runner reports support, the footer disables Speed and the
+server rejects a faster tier before sending the command to the runner.
+
 The authenticated runtime-capability reply identifies the web process and its
 runner ownership. `bin/restart` bypasses the legacy idle guard only when that PID
 matches the supervised web unit. A legacy process cannot make this claim, so the

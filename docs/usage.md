@@ -60,6 +60,22 @@ selector beneath the composer for the selected model.
 Animated dots mean the agent is working on a turn. Idle and archived chats have
 no dots.
 
+## Codex chat speed
+
+Choose **Speed** beside **Effort** beneath the composer. **Normal** is standard
+speed (1x). All Codex models in the catalog offer **Fast**. Sol (`gpt-6.2-sol`) also
+offers **Ultrafast**. The selector appears only for models with a faster tier.
+
+BobLM saves the choice per chat and applies it when the next turn starts. If
+you switch to a model that doesn't support the selected speed, the footer resets
+to **Normal**. A disabled Speed selector means the runner hasn't reported speed
+support. After a server upgrade, an older runner may still be finishing work.
+See [Restart one chat's runner](running.md#restart-one-chats-runner).
+
+To start a peer or subagent at Fast, include `"speed": "fast"` alongside
+`title` and `message` in the spawn arguments. Omit `speed` to start the child at
+Normal, even when the parent is running at Fast.
+
 ## Context and weekly usage
 
 On wider screens, two bars beneath the composer show how much context and weekly

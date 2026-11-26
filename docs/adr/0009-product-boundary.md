@@ -14,8 +14,8 @@ Behavior is fixed, not configured. A fork that wants different behavior changes
 code, in the tuning crate and theme file where that is easy (ADR 0018); there are
 still no settings screens. Sessions run with permissions bypassed. The
 interface is always dark with one font size. There are no settings screens, no
-theme or layout options, and no preferences stored on the server. Model and effort are choices stored
-with each session (ADR 0006).
+theme or layout options, and no preferences stored on the server. Model, effort and speed are choices stored
+with each session (ADR 0023).
 
 Out of scope, and not designed for: a terminal, voice dictation or assistants,
 a file browser or git view, global

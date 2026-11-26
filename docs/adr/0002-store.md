@@ -42,7 +42,10 @@ before publication. These internal event payloads do not define the client
 contract. Drafts stay in each browser. There are no version columns, users,
 namespaces, or machine identifiers.
 
-Sessions persist model and optional effort, and the model and effort last applied to a provider process. The default model is sonnet, matching
-the driver's current default; absent effort delegates to Claude's default.
-Changing this choice records an event atomically. The tuning catalog defines supported models and efforts. The runner applies the
-stored choice at the next idle turn boundary (ADR 0006).
+Each session stores its selected model, effort and speed alongside the values
+last applied by the runner. The database default for `model` is `sonnet`.
+A null effort lets Claude use its default. Both `speed` and `applied_speed` are
+nullable. A null speed means Normal, including for existing chats.
+Changing the selection and recording its event share a transaction.
+The runner applies the stored choice at the next idle turn boundary. A
+difference between the selected and applied values marks the selection pending.

@@ -465,6 +465,7 @@ async fn only_enabled_claude_plan_destinations_for_claude_plan_chats_are_accepte
                 agent: "codex",
                 model: "gpt-6.1-sol",
                 effort: None,
+                speed: None,
                 created_at: 3,
             })
             .unwrap();

@@ -177,7 +177,7 @@ impl RunningSession {
                 archived: row.archived,
                 model: row.model,
                 effort: row.effort,
-                speed: row.speed,
+                speed: None,
             })
         })
         .await??;

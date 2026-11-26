@@ -28,6 +28,7 @@ fn migrations_032_and_033_backfill_dedupe_and_keep_the_aggregate_current() {
                 agent,
                 model,
                 effort: None,
+                speed: None,
                 created_at: 2,
             })
             .unwrap();

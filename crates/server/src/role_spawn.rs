@@ -453,6 +453,7 @@ fn blind_session(session: &mut Value) {
             "model",
             "modelLabel",
             "effort",
+            "speed",
         ] {
             status.remove(field);
         }

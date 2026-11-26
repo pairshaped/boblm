@@ -9,7 +9,10 @@ protocol detail stays in the driver.
 Delivery proof is per agent. Claude proves consumption with `command_lifecycle`
 `started` or `completed`. Codex's app-server steers with `turn/steer` carrying
 the expected turn id and a client message id, interrupts with `turn/interrupt`,
-and takes model and effort on `turn/start`. Codex has consumed a message when it
+and takes model, effort and `serviceTierForTurn` on `turn/start`. The driver
+sends `default` for Normal so a thread's faster tier cannot override the chat's
+choice. Fast maps to `priority` and Ultrafast to `ultrafast`. Steering leaves the
+running turn's tier in place. Codex has consumed a message when it
 announces a `userMessage` item whose `clientId` is our client message id; the
 driver translates that to the same `started` lifecycle (docs/live-codex-protocol.md).
 Codex's `/compact` starts when Codex announces the compaction item, not when it accepts

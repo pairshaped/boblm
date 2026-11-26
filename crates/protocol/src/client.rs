@@ -91,6 +91,24 @@ pub fn model_catalog() -> Vec<ModelOption> {
         })
         .collect()
 }
+/// Preserve an explicitly reported normal tier when decoding a runner status.
+pub fn reported_speed<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+pub fn check_speed(model: &str, speed: Option<&str>) -> Result<(), String> {
+    if let Some(tier) = speed
+        && !boblm_tuning::MODELS
+            .iter()
+            .any(|m| m.id == model && m.speeds.contains(&tier))
+    {
+        return Err("The selected model does not support that speed. Choose Normal or a speed listed for this model.".into());
+    }
+    Ok(())
+}
+
 fn model_names() -> String {
     boblm_tuning::MODELS
         .iter()
@@ -733,7 +751,13 @@ pub struct SessionStatus {
     pub archived: bool,
     pub model: String,
     pub effort: Option<String>,
-    pub speed: Option<String>,
+    /// Missing on runners that predate speed selection. Null means Normal.
+    #[serde(
+        default,
+        deserialize_with = "reported_speed",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub speed: Option<Option<String>>,
 }
 /// Counts a root's subagents for its sidebar entry and alert badge.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

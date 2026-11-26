@@ -1,11 +1,11 @@
 ---
 # boblm-09f0
 title: Footer speed dropdown
-status: in-progress
+status: completed
 type: feature
 priority: normal
 created_at: 2026-11-21T17:20:24Z
-updated_at: 2026-11-21T17:37:19Z
+updated_at: 2026-11-21T17:49:31Z
 ---
 
 Add a speed selector immediately after reasoning effort in the chat footer.
@@ -19,3 +19,9 @@ Built the release and verified the pre-058 backup. Production runner replacement
 
 
 Full workspace verification passed with bin/check. The production rollout is pending.
+
+
+The follow-up renames the default option to Normal and adds optional speed to spawn_peer and spawn_subagent. The spawn transaction stores the requested tier before queuing the first message. The server checks runner support before sending a speed change. Reproduced the EOF with a pre-058 runner, then verified disabled Normal on that runner and a saved Fast selection after upgrading it.
+
+
+Deployed the follow-up after bin/check passed. Verified that the live peer and subagent tools advertise optional speed and this chat reports support for speed changes.

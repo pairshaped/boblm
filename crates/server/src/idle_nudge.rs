@@ -263,6 +263,7 @@ mod tests {
                 agent: "claude".into(),
                 model: "sonnet".into(),
                 effort: "high".into(),
+                speed: None,
                 title: "Child".into(),
                 content: "work".into(),
                 created_at,

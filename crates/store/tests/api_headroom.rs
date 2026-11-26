@@ -23,6 +23,7 @@ fn api_headroom_counts_uncached_tokens_and_only_projects_mid_turn_api_reviewers(
                 agent: "codex",
                 model: MODEL_GPT_6_LUNA,
                 effort: Some("xhigh"),
+                speed: None,
                 created_at,
             })
             .unwrap();

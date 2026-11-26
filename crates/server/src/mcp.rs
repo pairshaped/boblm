@@ -146,9 +146,28 @@ struct TitleArgs {
     #[serde(default)]
     only_if_unnamed: bool,
 }
+#[derive(Clone, Copy, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum SpawnSpeed {
+    Normal,
+    #[serde(alias = "priority")]
+    Fast,
+    Ultrafast,
+}
+impl SpawnSpeed {
+    fn tier(self) -> Option<&'static str> {
+        match self {
+            Self::Normal => None,
+            Self::Fast => Some("priority"),
+            Self::Ultrafast => Some("ultrafast"),
+        }
+    }
+}
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct SpawnArgs {
+    /// Initial speed. Omit for normal. The selected model must support the requested speed.
+    speed: Option<SpawnSpeed>,
     /// Fresh UUID for this creation. Reuse only for an identical explicit retry.
     request_id: String,
     /// Required chat title, 1 to 200 characters.
@@ -168,6 +187,8 @@ struct SpawnArgs {
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct SpawnSubagentArgs {
+    /// Initial speed. Omit for normal. The selected model must support the requested speed.
+    speed: Option<SpawnSpeed>,
     /// Fresh UUID for this creation. Reuse only for an identical explicit retry.
     request_id: String,
     /// Required chat title, 1 to 200 characters.
@@ -183,6 +204,8 @@ struct SpawnSubagentArgs {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PlainSpawnArguments<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speed: Option<&'a str>,
     request_id: &'a str,
     title: &'a str,
     message: &'a str,
@@ -193,6 +216,8 @@ struct PlainSpawnArguments<'a> {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RoleSpawnArguments<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speed: Option<&'a str>,
     request_id: &'a str,
     title: &'a str,
     message: &'a str,
@@ -306,6 +331,7 @@ fn result_untrusted(banner: &str, value: Result<serde_json::Value, String>) -> C
     }
 }
 struct RoleSpawnRequest {
+    speed: Option<&'static str>,
     request_id: String,
     caller: String,
     title: String,
@@ -398,6 +424,7 @@ async fn spawn_role(
         .await
         .map_err(|error| format!("Could not resolve the role: {error}."))??
     };
+    boblm_protocol::client::check_speed(route.model, request.speed)?;
     let route_value = crate::role_spawn::route_json(&route);
     let project_id = if request.visible_root {
         match request.project_id.as_deref() {
@@ -468,6 +495,7 @@ async fn spawn_role(
             agent: agent.as_str().into(),
             model: route.model.to_owned(),
             effort: route.effort.to_owned(),
+            speed: request.speed.map(str::to_owned),
             title: request.title.clone(),
             content,
             created_at,
@@ -863,6 +891,7 @@ impl Peers {
                     }.into());
                 }
                 let arguments = serde_json::to_string(&RoleSpawnArguments {
+                    speed: args.speed.and_then(SpawnSpeed::tier),
                     request_id: &args.request_id,
                     title: &args.title,
                     message: &args.message,
@@ -874,6 +903,7 @@ impl Peers {
                 return spawn_role(
                     &self.app,
                     RoleSpawnRequest {
+                        speed: args.speed.and_then(SpawnSpeed::tier),
                         request_id: args.request_id,
                         caller,
                         title: args.title,
@@ -897,6 +927,7 @@ impl Peers {
             // Accept a catalog label (terra, dsf) as well as the model ID, and store the ID.
             let model=boblm_tuning::MODELS.iter().find(|m|m.label==model).map_or(model,|m|m.id);
             let agent=boblm_protocol::client::check_choice(model,Some(effort))?;
+            boblm_protocol::client::check_speed(model,args.speed.and_then(SpawnSpeed::tier))?;
             let project=match &args.project_id {
                 Some(id)=>{
                     let id=boblm_runner::canonical_uuid(id).map_err(|_|format!("projectId must be a project's UUID from list_projects; got {}.", boblm_protocol::client::shown(id)))?;
@@ -912,6 +943,7 @@ impl Peers {
             };
             if !std::path::Path::new(&project.path).is_dir(){return Err(format!("The project folder {} does not exist or is not a directory, so a chat cannot start there. Restore the folder and try again.", project.path));}
             let arguments=serde_json::to_string(&PlainSpawnArguments {
+                speed: args.speed.and_then(SpawnSpeed::tier),
                 request_id: &args.request_id,
                 title: &args.title,
                 message: &args.message,
@@ -933,7 +965,7 @@ impl Peers {
                     crate::claude_account::choose_plan_for_spawn(&store, enabled.plan, created_at / 1000).map(|key| Some(key.into()))
                 }).await.map_err(|error| format!("Could not choose a Claude account: {error}. Try again after storage is available."))??
             } else { None };
-            let (session,created)=self.app.spawn_peer(boblm_store::PeerSpawn{request_id:args.request_id.clone(),caller,arguments,project_id:project.id.clone(),agent:agent.as_str().into(),model:model.to_owned(),effort:effort.to_owned(),title:args.title,content,created_at,parent_session_id:None,root_session_id:None,role:None,resolved:None,working_directory:None,account_key}).await?;
+            let (session,created)=self.app.spawn_peer(boblm_store::PeerSpawn{request_id:args.request_id.clone(),caller,arguments,project_id:project.id.clone(),agent:agent.as_str().into(),model:model.to_owned(),effort:effort.to_owned(),speed:args.speed.and_then(SpawnSpeed::tier).map(str::to_owned),title:args.title,content,created_at,parent_session_id:None,root_session_id:None,role:None,resolved:None,working_directory:None,account_key}).await?;
             let dispatch_failed=session.status.queue_held && session.status.queued>0 && !session.status.running;
             Ok(serde_json::json!({"sessionId":args.request_id,"messageId":args.request_id,"accepted":true,"alreadyAccepted":!created,"dispatchFailed":dispatch_failed,"session":session}))
         }.await)
@@ -957,6 +989,7 @@ impl Peers {
             boblm_protocol::client::check_chat_name(&args.title, false)?;
             let (role, difficulty) = crate::role_spawn::parse_role(&args.role, args.difficulty.as_deref())?;
             let arguments = serde_json::to_string(&RoleSpawnArguments {
+                speed: args.speed.and_then(SpawnSpeed::tier),
                 request_id: &args.request_id,
                 title: &args.title,
                 message: &args.message,
@@ -968,6 +1001,7 @@ impl Peers {
             spawn_role(
                 &self.app,
                 RoleSpawnRequest {
+                    speed: args.speed.and_then(SpawnSpeed::tier),
                     request_id: args.request_id,
                     caller,
                     title: args.title,

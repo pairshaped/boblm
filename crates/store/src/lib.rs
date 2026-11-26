@@ -222,6 +222,7 @@ mod tests {
             agent: "claude".into(),
             model: "opus".into(),
             effort: "high".into(),
+            speed: None,
             title: "Fixture chat".into(),
             content: "keep".into(),
             created_at: 2,
@@ -871,6 +872,7 @@ mod tests {
                 agent: "codex",
                 model: "gpt-6-luna",
                 effort: Some("low"),
+                speed: None,
                 created_at: 2,
             })
             .unwrap();
@@ -902,6 +904,7 @@ mod tests {
                 agent: "codex",
                 model: "gpt-6-luna",
                 effort: Some("high"),
+                speed: None,
                 created_at: 2,
             })
             .unwrap();
@@ -944,6 +947,7 @@ mod tests {
                 agent: "claude",
                 model: "sonnet",
                 effort: None,
+                speed: None,
                 created_at: 3
             }),
             Err(Error::ProjectMissing)
@@ -1160,6 +1164,7 @@ mod tests {
                     agent: "claude",
                     model: "sonnet",
                     effort: None,
+                    speed: None,
                     created_at: 9,
                 })
                 .unwrap();
@@ -1172,6 +1177,7 @@ mod tests {
                 agent: "claude",
                 model: "sonnet",
                 effort: None,
+                speed: None,
                 created_at: 9,
             })
             .unwrap();
@@ -1209,6 +1215,7 @@ mod tests {
                 agent: "claude",
                 model: "sonnet",
                 effort: None,
+                speed: None,
                 created_at: 1,
             })
             .unwrap();
@@ -1236,6 +1243,7 @@ mod tests {
                     agent: "claude",
                     model: "sonnet",
                     effort: None,
+                    speed: None,
                     created_at: 2,
                 })
                 .unwrap();

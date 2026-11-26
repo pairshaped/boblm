@@ -266,7 +266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         archived: false,
         model: "sonnet".into(),
         effort: Some("high".into()),
-        speed: None,
+        speed: Some(None),
     };
     let session = SessionInfo {
         project_id: "20000000-0000-4000-8000-000000000001".into(),

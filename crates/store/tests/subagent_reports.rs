@@ -22,6 +22,7 @@ fn child(store: &Store) -> String {
             agent: "claude".into(),
             model: "sonnet".into(),
             effort: "high".into(),
+            speed: None,
             title: "Worker".into(),
             content: "work".into(),
             created_at: 2,

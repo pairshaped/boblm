@@ -86,7 +86,12 @@ pub struct Status {
     pub archived: bool,
     pub model: String,
     pub effort: Option<String>,
-    pub speed: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "boblm_protocol::client::reported_speed",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub speed: Option<Option<String>>,
 }
 /// Outcome of a self-compaction request, including refusals and the observed context size.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,6 +199,9 @@ impl SessionHandle {
         effort: Option<&str>,
         speed: Option<&str>,
     ) -> Result<()> {
+        if speed.is_some() && self.published_status()?.speed.is_none() {
+            return Err(Error::Invalid("This runner cannot change speed yet. Let the chat finish its work and try again after its runner updates.".into()));
+        }
         self.call(Action::SetModel(
             model.to_owned(),
             effort.map(str::to_owned),
@@ -687,7 +695,7 @@ impl Actor {
             archived: session.archived,
             model: session.model,
             effort: session.effort,
-            speed: session.speed,
+            speed: Some(session.speed),
         })
     }
     async fn publish_status(&mut self) -> Result<()> {
@@ -1136,15 +1144,8 @@ impl Actor {
             Action::SetModel(model, effort, speed) => {
                 let agent = boblm_protocol::client::check_choice(&model, effort.as_deref())
                     .map_err(Error::Invalid)?;
-                if let Some(tier) = speed.as_deref()
-                    && !boblm_tuning::MODELS
-                        .iter()
-                        .any(|m| m.id == model && m.speeds.contains(&tier))
-                {
-                    return Err(Error::Invalid(format!(
-                        "The {model} model does not support that speed. Choose a speed listed for this model."
-                    )));
-                }
+                boblm_protocol::client::check_speed(&model, speed.as_deref())
+                    .map_err(Error::Invalid)?;
                 let current = self.session().await?;
                 if current.agent != agent.as_str() {
                     let own = boblm_protocol::client::Agent::parse(&current.agent)

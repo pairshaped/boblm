@@ -714,6 +714,7 @@ mod routing_tests {
                         agent: "claude",
                         model,
                         effort: None,
+                        speed: None,
                         created_at: 1,
                     })
                     .unwrap();

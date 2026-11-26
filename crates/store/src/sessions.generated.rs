@@ -13,11 +13,12 @@ pub struct CreateParams<'a> {
     pub agent: &'a str,
     pub model: &'a str,
     pub effort: Option<&'a str>,
+    pub speed: Option<&'a str>,
     pub created_at: i64,
 }
 
-const CREATE_SQL: &str = r"INSERT INTO sessions (id, name, working_directory, project_id, agent, model, effort, applied_model, applied_effort, created_at, position)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?6, ?7, ?8,
+const CREATE_SQL: &str = r"INSERT INTO sessions (id, name, working_directory, project_id, agent, model, effort, applied_model, applied_effort, speed, applied_speed, created_at, position)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?6, ?7, ?8, ?8, ?9,
         (SELECT COALESCE(MAX(position), 0) + 1 FROM sessions WHERE project_id = ?4))";
 
 pub fn create(conn: impl MutationConnection, params: CreateParams<'_>) -> Result<usize> {
@@ -32,6 +33,7 @@ pub fn create(conn: impl MutationConnection, params: CreateParams<'_>) -> Result
             params.agent,
             params.model,
             params.effort,
+            params.speed,
             params.created_at
         ],
     )

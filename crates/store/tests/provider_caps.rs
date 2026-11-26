@@ -19,6 +19,7 @@ fn request(
         agent: agent.into(),
         model: model.into(),
         effort: "high".into(),
+        speed: None,
         title: "Work".into(),
         content: "work".into(),
         created_at: 1000,
@@ -107,6 +108,7 @@ fn provider_caps_span_roots_include_owner_chats_and_preserve_retries() {
                     agent: "pi",
                     model: "other",
                     effort: None,
+                    speed: None,
                     created_at: 1,
                 })
                 .unwrap();
@@ -187,6 +189,7 @@ fn provider_caps_span_roots_include_owner_chats_and_preserve_retries() {
                 agent,
                 model,
                 effort: None,
+                speed: None,
                 created_at: 2,
             })
             .unwrap();

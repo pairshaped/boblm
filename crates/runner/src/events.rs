@@ -87,3 +87,27 @@ pub async fn session_list_page(
     .await??;
     records.into_iter().map(|e| serde_json::from_value(serde_json::json!({"sessionId":e.session,"seq":sequence(e.seq)?,"kind":e.kind,"payload":serde_json::from_str::<serde_json::Value>(&e.payload).map_err(std::io::Error::other)?,"createdAt":e.created_at})).map_err(|e|std::io::Error::other(e).into())).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_runner_status_preserves_absent_speed_and_normal_reports_null() {
+        let mut raw = json!({
+            "stopped": false, "selection_pending": false, "queue_held": false,
+            "running": false, "turn_active": false, "stopping": false,
+            "queued": 0, "dispatching": 0, "uncertain": 0, "rejected": 0,
+            "archived": false, "model": "gpt-6.2-sol"
+        });
+        for speed in [None, Some(json!(null)), Some(json!("priority"))] {
+            if let Some(value) = &speed {
+                raw["speed"] = value.clone();
+            }
+            let status: Status = serde_json::from_value(raw.clone()).unwrap();
+            let wire = serde_json::to_value(wire_status(status).unwrap()).unwrap();
+            assert_eq!(wire.get("speed"), speed.as_ref());
+        }
+    }
+}

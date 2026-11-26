@@ -26,7 +26,7 @@ Agents get the same view: `list_projects`, and `spawn_peer` takes an optional `p
 
 A chat runs on Claude Code, Codex or Pi. Its model decides which: the catalog (the `MODELS` list in
 the tuning crate, ADR 0018) names every model the server offers, the agent that runs it and the
-reasoning efforts it accepts. Creating a chat picks a model and optionally an effort; the server
+reasoning efforts and optional speed tiers it accepts. Creating a chat picks a model and optionally an effort; the server
 checks both against the catalog and records the agent. The agent never changes for the life of a
 chat, so switching model inside a chat is limited to models of the same agent, and the message
 says to start a new chat to use the other agent. The catalog's Codex entries match what
@@ -35,7 +35,10 @@ says to start a new chat to use the other agent. The catalog's Codex entries mat
 The New chat dialog, opened from a project, asks for the model (one list, grouped by agent) and
 the reasoning effort that model supports. Every new chat defaults to Opus at high
 effort (`DEFAULT_MODEL` and `DEFAULT_EFFORT`), including browsers with an earlier
-remembered choice. Existing chats keep their stored model and effort.
+remembered choice. Chats created in the dialog start at Normal speed.
+Existing chats keep their stored model, effort and speed. Changing the model
+in the footer preserves the speed if the new model supports it and otherwise
+selects Normal.
 
 ## Claude accounts
 

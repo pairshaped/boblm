@@ -24,6 +24,7 @@ async fn persistent_runner_process_keeps_agent_and_turn_across_client_replacemen
             agent: "codex",
             model: "gpt-6.1-sol",
             effort: Some("medium"),
+            speed: None,
             created_at: 2,
         })
         .unwrap();

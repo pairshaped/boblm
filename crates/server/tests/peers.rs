@@ -76,6 +76,7 @@ async fn list_peers_labels_subagents_and_archiving_a_root_cascades() {
             agent: "claude".into(),
             model: "sonnet".into(),
             effort: "high".into(),
+            speed: None,
             title: "Fixture chat".into(),
             content: "work".into(),
             created_at: 3,
@@ -173,6 +174,7 @@ async fn account_usage_tool_returns_every_account_and_the_calling_chat() {
             agent: "codex",
             model: "gpt-6.1-sol",
             effort: None,
+            speed: None,
             created_at: 2,
         })
         .unwrap();
@@ -269,6 +271,7 @@ async fn usage_report_groups_fixture_events_by_model_week_and_account_day() {
                 agent,
                 model,
                 effort: None,
+                speed: None,
                 created_at: 2,
             })
             .unwrap();
@@ -769,6 +772,7 @@ async fn a_parent_reopens_its_own_archived_subagent_but_another_chat_cannot() {
             agent: "claude".into(),
             model: "sonnet".into(),
             effort: "high".into(),
+            speed: None,
             title: "Worker".into(),
             content: "work".into(),
             created_at: 2,
@@ -885,6 +889,7 @@ async fn the_root_reports_subagent_state_and_answers_its_questions() {
             agent: "claude".into(),
             model: "sonnet".into(),
             effort: "high".into(),
+            speed: None,
             title: "Worker".into(),
             content: "work".into(),
             created_at: 2,
@@ -1008,7 +1013,7 @@ async fn spawn_requires_model_and_effort_and_inherits_directory_only() {
     );
     let router = app.router(Some(temp.path().into()));
     let id = "00000000-0000-4000-8000-000000000003";
-    let args = serde_json::json!({"title":"Spawned chat","requestId":id,"message":"Do this independently","model":"opus","effort":"high"});
+    let args = serde_json::json!({"title":"Spawned chat","requestId":id,"message":"Do this independently","model":"sol","effort":"high","speed":"fast"});
     let mut no_title = args.clone();
     no_title.as_object_mut().unwrap().remove("title");
     let invalid = call(&router, token, "caller", "spawn_peer", no_title).await;
@@ -1023,6 +1028,10 @@ async fn spawn_requires_model_and_effort_and_inherits_directory_only() {
         let invalid = call(&router, token, "caller", "spawn_peer", null).await;
         assert!(invalid.get("error").is_some() || invalid["result"]["isError"] == true);
     }
+    let mut unsupported = args.clone();
+    unsupported["model"] = serde_json::json!("opus");
+    let rejected = call(&router, token, "caller", "spawn_peer", unsupported).await;
+    assert_eq!(rejected["result"]["isError"], true);
     let (spawned, simultaneous) = tokio::join!(
         call(&router, token, "caller", "spawn_peer", args.clone()),
         call(&router, token, "caller", "spawn_peer", args.clone())
@@ -1037,7 +1046,11 @@ async fn spawn_requires_model_and_effort_and_inherits_directory_only() {
         temp.path().to_str().unwrap()
     );
     assert_eq!(report["session"]["name"], "Spawned chat");
-    assert_eq!(report["session"]["status"]["model"], "opus");
+    assert_eq!(
+        report["session"]["status"]["model"],
+        boblm_tuning::MODEL_GPT_6_2_SOL
+    );
+    assert_eq!(report["session"]["status"]["speed"], "priority");
     assert_eq!(report["session"]["status"]["effort"], "high");
     let first = received.recv().await.unwrap();
     assert_eq!(first.uuid, id);
@@ -1181,7 +1194,7 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
     );
     let router = app.router(Some(temp.path().into()));
     let first_id = "00000000-0000-4000-8000-000000000101";
-    let args = serde_json::json!({"title":"Spawned chat","requestId":first_id,"message":"implement this","role":"implementer","difficulty":"simple"});
+    let args = serde_json::json!({"title":"Spawned chat","requestId":first_id,"message":"implement this","role":"implementer","difficulty":"simple","speed":"fast"});
     let first = tool_value(&call(&router, token, "caller", "spawn_subagent", args.clone()).await);
     assert_eq!(first["routing"]["model"], boblm_tuning::MODEL_GPT_6_2_SOL);
     assert_eq!(
@@ -1202,6 +1215,7 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
         .into_iter()
         .find(|session| session.id == first_id)
         .unwrap();
+    assert_eq!(stored.speed.as_deref(), Some("priority"));
     assert_eq!(stored.account_key.as_deref(), Some("codex-plan"));
 
     // A retry uses the stored route even after the allowances would choose Sonnet.
@@ -1230,6 +1244,7 @@ async fn role_subagents_resolve_once_refuse_nesting_and_enforce_the_limit() {
             agent: "codex",
             model: "gpt-6.1-sol",
             effort: None,
+            speed: None,
             created_at: 2,
         })
         .unwrap();
@@ -1532,8 +1547,9 @@ async fn role_spawn_peer_creates_a_visible_root_with_the_resolved_choice() {
     );
     let router = app.router(Some(temp.path().into()));
     let id = "00000000-0000-4000-8000-000000000201";
-    let args = serde_json::json!({"title":"Spawned chat","requestId":id,"message":"implement this","role":"implementer","difficulty":"hard"});
+    let args = serde_json::json!({"title":"Spawned chat","requestId":id,"message":"implement this","role":"implementer","difficulty":"hard","speed":"ultrafast"});
     let spawned = tool_value(&call(&router, token, "caller", "spawn_peer", args.clone()).await);
+    assert_eq!(spawned["session"]["status"]["speed"], "ultrafast");
     assert_eq!(spawned["routing"]["model"], boblm_tuning::MODEL_GPT_6_2_SOL);
     assert_eq!(spawned["routing"]["effort"], "high");
     assert_eq!(spawned["routing"]["step"], "implementer-codex-plan");
@@ -1541,6 +1557,10 @@ async fn role_spawn_peer_creates_a_visible_root_with_the_resolved_choice() {
     assert!(spawned["session"].get("parentSessionId").is_none());
     assert!(spawned["session"].get("rootSessionId").is_none());
     assert_eq!(spawned["session"]["role"], "implementer");
+    let mut different_speed = args.clone();
+    different_speed["speed"] = serde_json::json!("normal");
+    let conflict = call(&router, token, "caller", "spawn_peer", different_speed).await;
+    assert_eq!(conflict["result"]["isError"], true);
     let repeated = tool_value(&call(&router, token, "caller", "spawn_peer", args).await);
     assert_eq!(repeated["alreadyAccepted"], true);
     assert_eq!(
@@ -2426,6 +2446,7 @@ async fn a_subagent_asking_for_a_reviewer_is_told_to_message_its_parent() {
             agent: "claude".into(),
             model: "sonnet".into(),
             effort: "high".into(),
+            speed: None,
             title: "Helper".into(),
             content: "work".into(),
             created_at: 3,
@@ -2784,6 +2805,7 @@ async fn retired_grunt_sessions_and_receipts_still_load_and_display() {
             agent: "claude".into(),
             model: "haiku".into(),
             effort: "high".into(),
+            speed: None,
             title: "Legacy grunt".into(),
             content: "old work".into(),
             created_at: 2,
@@ -2980,6 +3002,7 @@ async fn account_usage_command_lists_labeled_enabled_accounts_without_secrets() 
             agent: "codex",
             model: "gpt-6.1-sol",
             effort: None,
+            speed: None,
             created_at: 2,
         })
         .unwrap();
@@ -3134,6 +3157,7 @@ fn implementer_routes_across_plan_resets() {
                     agent,
                     model: "sonnet",
                     effort: None,
+                    speed: None,
                     created_at: 1,
                 })
                 .unwrap();

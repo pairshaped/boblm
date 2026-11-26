@@ -1,6 +1,6 @@
 -- func: create
-INSERT INTO sessions (id, name, working_directory, project_id, agent, model, effort, applied_model, applied_effort, created_at, position)
-VALUES (@id, @name, @working_directory, @project_id, @agent, @model, @effort, @model, @effort, @created_at,
+INSERT INTO sessions (id, name, working_directory, project_id, agent, model, effort, applied_model, applied_effort, speed, applied_speed, created_at, position)
+VALUES (@id, @name, @working_directory, @project_id, @agent, @model, @effort, @model, @effort, @speed, @speed, @created_at,
         (SELECT COALESCE(MAX(position), 0) + 1 FROM sessions WHERE project_id = @project_id));
 
 -- func: list
