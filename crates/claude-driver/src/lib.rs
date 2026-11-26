@@ -112,56 +112,90 @@ impl Drop for IncompleteWrite<'_> {
     }
 }
 
-/// The project's MCP servers from `cwd/.mcp.json`. A missing file means none; an
-/// unreadable or malformed one is reported and skipped so the chat still starts
-/// with BobLM's tools and can be used to repair it.
-fn project_mcp_servers(cwd: &Path) -> serde_json::Map<String, serde_json::Value> {
-    let path = cwd.join(".mcp.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Default::default(),
-        Err(error) => {
-            eprintln!(
-                "Skipping project MCP servers: {} could not be read: {error}",
-                path.display()
-            );
-            return Default::default();
+/// The MCP servers Claude itself would load for `cwd`: user scope (top-level
+/// `mcpServers` in `.claude.json`), project scope (`cwd/.mcp.json`) and local scope
+/// (`projects[cwd].mcpServers` in `.claude.json`), later scopes winning as in Claude.
+/// `.claude.json` lives in the account's `CLAUDE_CONFIG_DIR`, or `$HOME` without one.
+/// A missing file means no servers; an unreadable or malformed one is reported and
+/// skipped so the chat still starts with BobLM's tools and can be used to repair it.
+fn configured_mcp_servers(
+    command: &Command,
+    cwd: &Path,
+) -> serde_json::Map<String, serde_json::Value> {
+    let config_dir = match command
+        .as_std()
+        .get_envs()
+        .find(|(name, _)| *name == "CLAUDE_CONFIG_DIR")
+    {
+        Some((_, value)) => value.map(std::ffi::OsStr::to_owned),
+        None => std::env::var_os("CLAUDE_CONFIG_DIR"),
+    }
+    .or_else(|| std::env::var_os("HOME"))
+    .map(std::path::PathBuf::from);
+    let claude_json = config_dir.map(|dir| dir.join(".claude.json"));
+    let claude = claude_json.as_deref().and_then(read_json_object);
+    let project_path = cwd.join(".mcp.json");
+    let project = read_json_object(&project_path);
+    let local = cwd.to_str().and_then(|key| {
+        claude
+            .as_ref()?
+            .get("projects")?
+            .get(key)?
+            .as_object()
+            .cloned()
+    });
+    let mut servers = serde_json::Map::new();
+    for (scope, config, path) in [
+        ("user", claude.as_ref(), claude_json.as_deref()),
+        ("project", project.as_ref(), Some(project_path.as_path())),
+        ("local", local.as_ref(), claude_json.as_deref()),
+    ] {
+        match config.and_then(|config| config.get("mcpServers")) {
+            None => {}
+            Some(serde_json::Value::Object(scoped)) => servers.extend(scoped.clone()),
+            Some(_) => eprintln!(
+                "Skipping {scope} MCP servers: mcpServers in {} must be an object.",
+                path.map_or("the Claude config".into(), |path| path
+                    .display()
+                    .to_string())
+            ),
         }
-    };
-    let mut servers = match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(serde_json::Value::Object(mut config)) => match config.remove("mcpServers") {
-            Some(serde_json::Value::Object(servers)) => servers,
-            None => return Default::default(),
-            Some(_) => {
-                eprintln!(
-                    "Skipping project MCP servers: mcpServers in {} must be an object.",
-                    path.display()
-                );
-                return Default::default();
-            }
-        },
-        Ok(_) => {
-            eprintln!(
-                "Skipping project MCP servers: {} must contain a JSON object.",
-                path.display()
-            );
-            return Default::default();
-        }
-        Err(error) => {
-            eprintln!(
-                "Skipping project MCP servers: {} is not valid JSON: {error}",
-                path.display()
-            );
-            return Default::default();
-        }
-    };
+    }
     if servers.remove("boblm").is_some() {
-        eprintln!(
-            "Ignoring the boblm server in {}; BobLM supplies its own.",
-            path.display()
-        );
+        eprintln!("Ignoring a configured MCP server named boblm; BobLM supplies its own.");
     }
     servers
+}
+
+fn read_json_object(path: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            eprintln!(
+                "Skipping MCP servers in {}: it could not be read: {error}",
+                path.display()
+            );
+            return None;
+        }
+    };
+    match serde_json::from_str(&text) {
+        Ok(serde_json::Value::Object(config)) => Some(config),
+        Ok(_) => {
+            eprintln!(
+                "Skipping MCP servers in {}: it must contain a JSON object.",
+                path.display()
+            );
+            None
+        }
+        Err(error) => {
+            eprintln!(
+                "Skipping MCP servers in {}: it is not valid JSON: {error}",
+                path.display()
+            );
+            None
+        }
+    }
 }
 
 /// A mode 0600 file in a mode 0700 directory, removed on drop.
@@ -226,8 +260,8 @@ impl ClaudeSession {
     /// Connect directly to the hub's HTTP MCP endpoint; no stdio bridge. The
     /// capability goes in a private file under `runtime_dir`, never on the command
     /// line where `ps` and `/proc` would show it. The file is removed with the session.
-    /// Strict mode keeps user-scope servers out, so the servers in the working
-    /// directory's `.mcp.json` are copied in beside `boblm`, which always wins.
+    /// Strict mode skips Claude's own server lookup and its trust prompt, so the
+    /// servers Claude would load are copied in beside `boblm`, which always wins.
     pub async fn spawn_command_with_mcp(
         mut command: Command,
         cwd: &Path,
@@ -236,7 +270,7 @@ impl ClaudeSession {
         bearer_token: &str,
         runtime_dir: &Path,
     ) -> io::Result<Self> {
-        let mut servers = project_mcp_servers(cwd);
+        let mut servers = configured_mcp_servers(&command, cwd);
         servers.insert(
             "boblm".into(),
             serde_json::json!({"type":"http","url":url,"headers":{"Authorization":format!("Bearer {bearer_token}")}}),

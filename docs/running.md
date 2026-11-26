@@ -51,11 +51,21 @@ record a quiet shutdown.
 
 ### A project's MCP server is missing
 
-Claude chats load MCP servers only from the `.mcp.json` file in the chat's
-working directory, next to BobLM's own `boblm` server. They don't load user-scope
-servers from `claude mcp add` or `.mcp.json` files in parent directories. A
-project entry named `boblm` is ignored. If the file is unreadable or isn't valid
-JSON, the chat still starts with only BobLM's tools, and the runner's journal says
+Claude chats load the servers Claude itself would load, next to BobLM's own
+`boblm` server:
+
+- User scope: top-level `mcpServers` in the account's `.claude.json`
+  (`CLAUDE_CONFIG_DIR/.claude.json`, or `~/.claude.json` for plan A).
+- Project scope: `.mcp.json` in the chat's working directory. Parent directories
+  aren't searched.
+- Local scope: `projects["<working directory>"].mcpServers` in the same
+  `.claude.json`.
+
+Local overrides project, and project overrides user. A server named `boblm` is
+always ignored. Add a server to each Claude account you use (`claude mcp add` with
+that account's `CLAUDE_CONFIG_DIR`). BobLM passes these servers to Claude itself,
+so Claude's project trust prompt doesn't apply. If a file is unreadable or isn't
+valid JSON, BobLM skips it, the chat still starts, and the runner's journal says
 why. After you add or change a server, restart that chat's runner.
 
 ### A spawn tool is missing the speed argument

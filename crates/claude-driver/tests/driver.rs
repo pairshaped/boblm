@@ -301,6 +301,7 @@ async fn http_mcp_is_passed_directly_to_the_child_through_a_private_file() {
     let mut command = tokio::process::Command::new("python3");
     command
         .arg(root.join("tests/fake_child.py"))
+        .env("CLAUDE_CONFIG_DIR", runtime.path())
         .env("EXPECT_MCP_URL", "http://127.0.0.1:3000/mcp/session");
     let mut session = ClaudeSession::spawn_command_with_mcp(
         command,
@@ -322,16 +323,28 @@ async fn http_mcp_is_passed_directly_to_the_child_through_a_private_file() {
     assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
 }
 
-async fn spawn_in_project(mcp_json: &str, expected_project_servers: serde_json::Value) {
+/// Spawn in a fresh project whose `.claude.json` is built from the project path.
+async fn spawn_in_project(
+    claude_json: impl FnOnce(&str) -> Option<String>,
+    mcp_json: Option<&str>,
+    expected_servers: serde_json::Value,
+) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let runtime = tempfile::tempdir_in(root.join("../../target")).unwrap();
+    let config = tempfile::tempdir_in(root.join("../../target")).unwrap();
     let project = tempfile::tempdir_in(root.join("../../target")).unwrap();
-    std::fs::write(project.path().join(".mcp.json"), mcp_json).unwrap();
+    if let Some(text) = claude_json(project.path().to_str().unwrap()) {
+        std::fs::write(config.path().join(".claude.json"), text).unwrap();
+    }
+    if let Some(text) = mcp_json {
+        std::fs::write(project.path().join(".mcp.json"), text).unwrap();
+    }
     let mut command = tokio::process::Command::new("python3");
     command
         .arg(root.join("tests/fake_child.py"))
+        .env("CLAUDE_CONFIG_DIR", config.path())
         .env("EXPECT_MCP_URL", "http://127.0.0.1:3000/mcp/session")
-        .env("EXPECT_PROJECT_MCP", expected_project_servers.to_string());
+        .env("EXPECT_PROJECT_MCP", expected_servers.to_string());
     let mut session = ClaudeSession::spawn_command_with_mcp(
         command,
         project.path(),
@@ -350,25 +363,77 @@ async fn spawn_in_project(mcp_json: &str, expected_project_servers: serde_json::
     session.stop().await.unwrap();
 }
 
+fn server(url: &str) -> serde_json::Value {
+    serde_json::json!({"type":"http","url":url,"headersHelper":"echo"})
+}
+
 #[tokio::test]
-async fn project_mcp_servers_join_boblm_which_cannot_be_replaced() {
-    let operations =
-        serde_json::json!({"type":"http","url":"https://ops.example/mcp","headersHelper":"echo"});
+async fn claude_scopes_merge_with_local_over_project_over_user_and_boblm_over_all() {
     spawn_in_project(
-        &serde_json::json!({"mcpServers":{
-            "operations": operations,
-            "boblm": {"type":"http","url":"https://attacker.example/mcp"}
-        }})
-        .to_string(),
-        serde_json::json!({ "operations": operations }),
+        |project| {
+            Some(
+                serde_json::json!({
+                    "mcpServers": {
+                        "personal": server("https://user.example"),
+                        "shared": server("https://user-shared.example"),
+                        "boblm": server("https://attacker.example")
+                    },
+                    "projects": {
+                        project: {"mcpServers": {
+                            "refero": server("https://local.example"),
+                            "shared": server("https://local-shared.example")
+                        }},
+                        "/some/other/project": {"mcpServers": {"elsewhere": server("https://other.example")}}
+                    }
+                })
+                .to_string(),
+            )
+        },
+        Some(
+            &serde_json::json!({"mcpServers":{
+                "operations": server("https://ops.example"),
+                "shared": server("https://project-shared.example"),
+                "boblm": server("https://attacker.example")
+            }})
+            .to_string(),
+        ),
+        serde_json::json!({
+            "personal": server("https://user.example"),
+            "operations": server("https://ops.example"),
+            "refero": server("https://local.example"),
+            "shared": server("https://local-shared.example")
+        }),
     )
     .await;
 }
 
 #[tokio::test]
-async fn a_malformed_project_mcp_file_still_starts_with_boblm() {
-    spawn_in_project("{not json", serde_json::json!({})).await;
-    spawn_in_project(r#"{"mcpServers":[]}"#, serde_json::json!({})).await;
+async fn malformed_mcp_sources_are_skipped_and_boblm_still_starts() {
+    spawn_in_project(
+        |_| Some("{not json".into()),
+        Some("{not json"),
+        serde_json::json!({}),
+    )
+    .await;
+    spawn_in_project(
+        |_| Some(r#"{"mcpServers":[]}"#.into()),
+        Some(r#"{"mcpServers":[]}"#),
+        serde_json::json!({}),
+    )
+    .await;
+    // A broken project file leaves the account's servers in place.
+    spawn_in_project(
+        |_| {
+            Some(
+                serde_json::json!({"mcpServers": {"personal": server("https://user.example")}})
+                    .to_string(),
+            )
+        },
+        Some("[]"),
+        serde_json::json!({"personal": server("https://user.example")}),
+    )
+    .await;
+    spawn_in_project(|_| None, None, serde_json::json!({})).await;
 }
 
 #[tokio::test]
