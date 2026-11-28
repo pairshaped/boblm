@@ -3188,6 +3188,12 @@ fn implementer_routes_across_plan_resets() {
             },
         )
         .unwrap();
+        // While Codex is preferred, it wins every row because no row exhausts it.
+        let expected = if boblm_tuning::IMPLEMENTER_PREFER_CODEX_PLAN {
+            "codex-plan"
+        } else {
+            expected
+        };
         assert_eq!(
             boblm_server::role_spawn::account_key_for_route(&route),
             Some(expected),

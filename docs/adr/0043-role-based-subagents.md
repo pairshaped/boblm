@@ -31,7 +31,10 @@ at high effort for either difficulty; Sonnet runs simple at medium and hard at h
 selection. Known future resets sort before unknown or expired readings. Ties and
 unknowns retain table order: Codex before Claude, and Claude A before B.
 Unavailable steps fall through to the next choice. The route reason reports the
-reset comparison and any availability rejection.
+reset comparison and any availability rejection. While the
+`IMPLEMENTER_PREFER_CODEX_PLAN` tunable is true, implementers skip the reset
+comparison and try the Codex plan first; Claude is used only when Codex is
+unavailable.
 
 Reviewers take no difficulty. A step is skipped for any reason (spent money, headroom,
 caps, disabled, not configured):

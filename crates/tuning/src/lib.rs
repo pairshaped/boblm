@@ -225,6 +225,9 @@ pub const IDLE_NUDGE_DELAY: Duration = Duration::from_secs(60);
 pub const IDLE_NUDGE_RECENT_JOB_WINDOW: Duration = Duration::from_secs(30 * 60);
 /// Automated prompt sent once when an automatically woken root turn leaves nothing running.
 pub const IDLE_NUDGE_TEXT: &str = "Your last turn ended but nothing is running that will wake you. If work remains, continue it now. If you're finished, or waiting on the owner or a peer, say so in one line and end your turn.";
+/// Whether implementer routing tries the Codex plan first instead of the plan that resets first.
+/// Codex still falls through to Claude when its allowance is unavailable.
+pub const IMPLEMENTER_PREFER_CODEX_PLAN: bool = true;
 /// Time allowed to write an interrupt to Claude.
 pub const INTERRUPT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Maximum running jobs rendered in the Jobs tab (contract).

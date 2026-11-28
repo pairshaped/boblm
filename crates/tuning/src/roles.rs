@@ -657,6 +657,7 @@ fn resolve_with(
             codex_enabled,
             openai_enabled,
             ProviderCounts::default(),
+            false,
         ),
     )
 }
@@ -683,6 +684,7 @@ pub fn resolve_with_groups(
             CODEX_PLAN_ROUTING_ENABLED,
             OPENAI_API_ROUTING_ENABLED,
             counts,
+            IMPLEMENTER_PREFER_CODEX_PLAN,
         ),
     )
 }
@@ -694,16 +696,17 @@ fn resolve_core(
     exhausted: &[ExhaustedStep],
     headroom: ApiHeadroom,
     now: i64,
-    (configured, codex_enabled, openai_enabled, counts): (
+    (configured, codex_enabled, openai_enabled, counts, prefer_codex): (
         impl Fn(StepId) -> bool,
         bool,
         bool,
         ProviderCounts,
+        bool,
     ),
 ) -> RouteOutcome {
     let mut rejections = Vec::new();
     let mut ordered: Vec<_> = steps(role).iter().collect();
-    if role == Role::Implementer {
+    if role == Role::Implementer && !prefer_codex {
         ordered.sort_by_key(|step| future_reset(readings, step.account, now).unwrap_or(i64::MAX));
     }
     for step in ordered {
@@ -785,7 +788,8 @@ fn resolve_core(
                             step.account,
                             readings,
                             now,
-                            rejections.is_empty()
+                            rejections.is_empty(),
+                            prefer_codex,
                         )
                     )
                 } else {
@@ -831,6 +835,7 @@ fn implementer_reset_reason(
     readings: &[AccountReading],
     now: i64,
     first: bool,
+    prefer_codex: bool,
 ) -> String {
     let other = if chosen == AccountKind::CodexPlan {
         AccountKind::ClaudePlan
@@ -854,6 +859,8 @@ fn implementer_reset_reason(
     };
     let why = if !first {
         "The earlier step is unavailable"
+    } else if prefer_codex && chosen == AccountKind::CodexPlan {
+        "IMPLEMENTER_PREFER_CODEX_PLAN puts the Codex plan first"
     } else if future_reset(readings, chosen, now) == future_reset(readings, other, now) {
         "Table order breaks the reset tie"
     } else {
@@ -995,13 +1002,14 @@ mod tests {
                 .into_iter()
                 .map(|step| ExhaustedStep { step, until: 4000 })
                 .collect();
-            let RouteOutcome::Chosen(route) = resolve(
+            let RouteOutcome::Chosen(route) = resolve_with(
                 Role::Implementer,
                 Difficulty::Simple,
                 &readings,
                 &marks,
                 ApiHeadroom::default(),
                 1000,
+                (StepId::configured, true, true),
             ) else {
                 panic!()
             };
@@ -1024,6 +1032,47 @@ mod tests {
                     assert_eq!(role, Role::Planner);
                     assert_eq!(claude_used, 98.0);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn preferring_codex_ignores_an_earlier_claude_reset_until_codex_runs_out() {
+        if !IMPLEMENTER_PREFER_CODEX_PLAN {
+            return;
+        }
+        for (codex_used, mark, expected) in [
+            (0.0, None, AccountKind::CodexPlan),
+            (100.0, None, AccountKind::ClaudePlan),
+            (
+                0.0,
+                Some(StepId::ImplementerCodexPlan),
+                AccountKind::ClaudePlan,
+            ),
+        ] {
+            let readings = [
+                reading(AccountKind::CodexPlan, Some(codex_used), Some(5000)),
+                reading(AccountKind::ClaudePlan, Some(0.0), Some(2000)),
+            ];
+            let marks: Vec<_> = mark
+                .into_iter()
+                .map(|step| ExhaustedStep { step, until: 4000 })
+                .collect();
+            let RouteOutcome::Chosen(route) = resolve(
+                Role::Implementer,
+                Difficulty::Simple,
+                &readings,
+                &marks,
+                ApiHeadroom::default(),
+                1000,
+            ) else {
+                panic!()
+            };
+            assert_eq!(route.account, expected, "{readings:?} {mark:?}");
+            if expected == AccountKind::CodexPlan {
+                assert!(route.reason.contains("IMPLEMENTER_PREFER_CODEX_PLAN"));
+            } else {
+                assert!(route.reason.contains("The earlier step is unavailable"));
             }
         }
     }
